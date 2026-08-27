@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- All real UI is Compose. This theme only controls the window before the
+         first frame, so it just needs to be dark and chrome-less. -->
+    <style name="Theme.SpotKofi" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/spotkofi_base</item>
+        <item name="android:statusBarColor">@color/transparent</item>
+        <item name="android:navigationBarColor">@color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
+    <!-- Applied to MainActivity so the system draws the splash, then hands off
+         to Theme.SpotKofi via postSplashScreenTheme. -->
+    <style name="Theme.SpotKofi.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/spotkofi_base</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.SpotKofi</item>
+    </style>
+
+</resources>

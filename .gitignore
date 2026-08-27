@@ -1,0 +1,39 @@
+### Secrets / machine-local ###
+# Holds sdk.dir and the Supabase publishable key. Never commit.
+local.properties
+*.keystore
+*.jks
+!debug.keystore
+.env
+.env.*
+
+### Gradle ###
+.gradle/
+build/
+captures/
+!gradle/wrapper/gradle-wrapper.jar
+
+### Android ###
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+release/
+output.json
+.cxx/
+
+### IDE ###
+*.iml
+.idea/
+!.idea/codeStyles/
+.kotlin/
+local.log
+
+### OS ###
+.DS_Store
+Thumbs.db
+desktop.ini

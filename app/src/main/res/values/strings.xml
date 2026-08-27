@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SpotKofi</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_library">Your Library</string>
+    <string name="nav_create">Create</string>
+
+    <!-- Profile drawer -->
+    <string name="cd_open_profile">Open profile menu</string>
+    <string name="cd_camera_search">Search with camera</string>
+    <string name="cd_new_message">New message</string>
+    <string name="cd_add_to_library">Add to your library</string>
+    <string name="cd_connect_device">Connect to a device</string>
+    <string name="cd_toggle_view">Switch between list and grid</string>
+    <string name="cd_pinned">Pinned</string>
+    <string name="cd_close">Close</string>
+
+    <!-- Content descriptions (accessibility) -->
+    <string name="cd_play">Play</string>
+    <string name="cd_pause">Pause</string>
+    <string name="cd_next">Next track</string>
+    <string name="cd_previous">Previous track</string>
+    <string name="cd_shuffle">Shuffle</string>
+    <string name="cd_repeat">Repeat</string>
+    <string name="cd_favourite">Save to your library</string>
+    <string name="cd_unfavourite">Remove from your library</string>
+    <string name="cd_more_options">More options</string>
+    <string name="cd_back">Navigate up</string>
+    <string name="cd_settings">Settings</string>
+    <string name="cd_artwork">Artwork</string>
+    <string name="cd_explicit">Explicit</string>
+</resources>

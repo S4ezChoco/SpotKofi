@@ -1,0 +1,50 @@
+package com.spotkofi.app.ui.navigation
+
+import com.spotkofi.app.R
+import kotlinx.serialization.Serializable
+
+/*
+ * Type-safe navigation routes.
+ *
+ * Each destination is a @Serializable object or data class rather than a string
+ * template, so arguments are checked at compile time and a typo in a route is a
+ * build error instead of a crash at runtime.
+ */
+
+@Serializable
+data object HomeRoute
+
+@Serializable
+data object SearchRoute
+
+@Serializable
+data object LibraryRoute
+
+/** Album, playlist or artist detail, resolved by [id]. */
+@Serializable
+data class CollectionRoute(val id: String)
+
+/** Full-screen player, presented over the tab content. */
+@Serializable
+data object NowPlayingRoute
+
+@Serializable
+data object SettingsRoute
+
+/**
+ * The four items in the bottom bar.
+ *
+ * [Create] is deliberately in this list even though it is not a route: in the
+ * real app it sits in the bar as a peer of the three tabs but opens a modal
+ * sheet. Modelling it as a nav destination would put a bogus entry on the back
+ * stack, so the bar reports the tap and the caller decides what to do.
+ */
+enum class TopLevelDestination(val labelRes: Int) {
+    Home(R.string.nav_home),
+    Search(R.string.nav_search),
+    Library(R.string.nav_library),
+    Create(R.string.nav_create),
+    ;
+
+    val isAction: Boolean get() = this == Create
+}

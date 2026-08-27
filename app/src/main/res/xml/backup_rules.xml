@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Auth tokens must never leave the device via backup. -->
+    <exclude domain="sharedpref" path="spotkofi_session.xml" />
+    <exclude domain="sharedpref" path="supabase_auth.xml" />
+</full-backup-content>

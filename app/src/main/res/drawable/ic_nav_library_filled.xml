@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Your Library" icon, selected state. Same spines, solid. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:pathData="M3.6,3.6 h3.2 v16.8 h-3.2 z"
+        android:fillColor="#FF000000" />
+    <path
+        android:pathData="M9.6,3.6 h4.2 v16.8 h-4.2 z"
+        android:fillColor="#FF000000" />
+    <path
+        android:pathData="M16.6,3.6 h3.8 v16.8 h-3.8 z"
+        android:fillColor="#FF000000" />
+</vector>

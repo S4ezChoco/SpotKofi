@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SpotKofi mark: a five bar audio equalizer wave.
+  Drawn with round-capped strokes so each bar reads as a pill.
+  All geometry sits inside the 18..90 adaptive-icon safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group>
+        <path
+            android:pathData="M26,47 L26,61"
+            android:strokeColor="#FF0B2E18"
+            android:strokeWidth="10"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M40,39 L40,69"
+            android:strokeColor="#FF0B2E18"
+            android:strokeWidth="10"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M54,31 L54,77"
+            android:strokeColor="#FF0B2E18"
+            android:strokeWidth="10"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M68,39 L68,69"
+            android:strokeColor="#FF0B2E18"
+            android:strokeWidth="10"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M82,47 L82,61"
+            android:strokeColor="#FF0B2E18"
+            android:strokeWidth="10"
+            android:strokeLineCap="round" />
+    </group>
+</vector>

@@ -1,0 +1,80 @@
+[versions]
+# Toolchain -------------------------------------------------------------------
+# AGP 9.2.1 pairs with the Gradle 9.2.0 distribution pinned in the wrapper.
+# AGP 9.2.1 requires Gradle 9.4.1+ (pinned in gradle-wrapper.properties).
+agp = "9.2.1"
+# Since AGP 9.0, Kotlin support is built into AGP, so `org.jetbrains.kotlin.android`
+# must NOT be applied.
+#
+# AGP 9.2.1 bundles KGP 2.2.10, but the AndroidX/Coil versions below transitively
+# pull kotlin-stdlib 2.4.10, whose metadata a 2.2 compiler cannot read
+# ("actual metadata version is 2.4.0, but the compiler ... can read up to 2.3.0").
+# So KGP is explicitly raised to match the stdlib, via the buildscript classpath
+# in the root build file. Keep this in step with the resolved stdlib version.
+kotlin = "2.4.10"
+
+# SDK levels ------------------------------------------------------------------
+# compileSdk 37 is required, not optional: navigation-compose 2.10.0, coil 3.6.0
+# and 19 other AAR dependencies declare a minCompileSdk of 37, so compiling
+# against 36 fails :app:checkDebugAarMetadata.
+#
+# targetSdk stays at 36 on purpose. Only compileSdk is forced by the dependency
+# metadata; targetSdk controls opt-in runtime behaviour changes and can be raised
+# deliberately later.
+compileSdk = "37"
+minSdk = "26"
+targetSdk = "36"
+
+# AndroidX --------------------------------------------------------------------
+# Compose BOM 2026.08.00 -> Compose 1.12.0 + Material3 1.4.0. Needs compileSdk 37
+# and AGP >= 9.1.2, both satisfied above.
+composeBom = "2026.08.00"
+coreKtx = "1.19.0"
+activityCompose = "1.13.0"
+lifecycle = "2.11.0"
+navigationCompose = "2.10.0"
+splashscreen = "1.0.1"
+
+# Third party -----------------------------------------------------------------
+coil = "3.6.0"
+kotlinxSerialization = "1.9.0"
+
+[libraries]
+# --- Build classpath (not app dependencies) ---
+# Raises the Kotlin compiler above the version AGP bundles. See the `kotlin` note above.
+kotlin-gradle-plugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
+
+# --- Core / lifecycle ---
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashscreen" }
+
+# --- Compose (versions come from the BOM) ---
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+
+# --- Navigation ---
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+
+# --- Images ---
+coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
+coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
+
+# --- Serialization (needed by navigation type-safe routes) ---
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+# NOTE: no `kotlin-android` entry on purpose. AGP 9 provides Kotlin compilation
+# itself and fails the build if that plugin is applied.
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

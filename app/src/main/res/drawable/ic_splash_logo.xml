@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same mark as the launcher icon, but green on transparent for the dark splash. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:pathData="M26,47 L26,61"
+        android:strokeColor="#FF1DB954"
+        android:strokeWidth="10"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M40,39 L40,69"
+        android:strokeColor="#FF1DB954"
+        android:strokeWidth="10"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M54,31 L54,77"
+        android:strokeColor="#FF1ED760"
+        android:strokeWidth="10"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M68,39 L68,69"
+        android:strokeColor="#FF1DB954"
+        android:strokeWidth="10"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M82,47 L82,61"
+        android:strokeColor="#FF1DB954"
+        android:strokeWidth="10"
+        android:strokeLineCap="round" />
+</vector>
