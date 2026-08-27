@@ -193,7 +193,16 @@ class FakeMusicRepository : MusicRepository {
     }
 
     private companion object {
-        const val LOAD_DELAY_MS = 350L
-        const val SEARCH_DELAY_MS = 200L
+        /**
+         * Zero on purpose.
+         *
+         * These were originally 350ms to force every screen to handle a loading
+         * state. That job is done, and the cost was real: opening a playlist ran
+         * `collection()` then `tracks()` back to back, so a spinner sat on screen
+         * for ~700ms on data that is already in memory. Reading mock data should
+         * be instant; genuine latency comes back on its own with a real API.
+         */
+        const val LOAD_DELAY_MS = 0L
+        const val SEARCH_DELAY_MS = 0L
     }
 }

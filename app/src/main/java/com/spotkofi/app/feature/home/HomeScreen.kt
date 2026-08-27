@@ -1,5 +1,6 @@
 package com.spotkofi.app.feature.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,13 +15,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -41,7 +46,12 @@ import com.spotkofi.app.ui.components.SegmentedChipPair
 import com.spotkofi.app.ui.components.SpotKofiChip
 import com.spotkofi.app.ui.components.SpotlightCard
 import com.spotkofi.app.ui.components.StationCard
+import com.spotkofi.app.ui.components.artworkSeedColor
+import com.spotkofi.app.ui.layout.ResponsiveLayout
+import com.spotkofi.app.ui.layout.rememberResponsiveLayout
+import com.spotkofi.app.ui.motion.staggeredEntry
 import com.spotkofi.app.ui.theme.SpotKofiTheme
+import com.spotkofi.app.ui.theme.headerWash
 
 @Composable
 fun HomeScreen(
@@ -77,9 +87,43 @@ private fun HomeContent(
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
+    val layout = rememberResponsiveLayout()
+
+    val listState = rememberLazyListState()
+
+    // Left as a State object and read only inside the wash's graphicsLayer block.
+    //
+    // Destructuring it with `by` here read it during composition, which meant this
+    // whole function, including the entire LazyColumn declaration, recomposed on
+    // every scroll frame. Reading it in the layer block keeps it in the draw phase.
+    val washAlpha = remember {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex > 0) {
+                0f
+            } else {
+                (1f - listState.firstVisibleItemScrollOffset / 420f).coerceIn(0f, 1f)
+            }
+        }
+    }
+
+    // Tinted from the first quick pick so the wash relates to what is on screen.
+    val washTint = remember(state.quickPicks.firstOrNull()?.id) {
+        state.quickPicks.firstOrNull()?.id?.let(::artworkSeedColor)
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
+        if (washTint != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .graphicsLayer { alpha = washAlpha.value }
+                    .background(headerWash(washTint)),
+            )
+        }
+
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = contentPadding,
         ) {
@@ -89,6 +133,7 @@ private fun HomeContent(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     HomeHeader(
                         state = state,
+                        gutter = layout.gutter,
                         onChipClick = onChipClick,
                         onOpenProfile = onOpenProfile,
                     )
@@ -101,7 +146,7 @@ private fun HomeContent(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(240.dp),
+                            .height(260.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         CircularProgressIndicator(color = colors.accent)
@@ -111,46 +156,54 @@ private fun HomeContent(
             }
 
             if (state.showQuickPicks) {
-                // Two-column grid built from paired rows. A LazyVerticalGrid cannot
-                // nest inside a LazyColumn, and chunking keeps the screen as one
-                // scroll container instead of two.
-                items(
-                    items = state.quickPicks.chunked(2),
-                    key = { pair -> "qp_" + pair.first().id },
-                ) { pair ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                horizontal = dimens.screenGutter,
-                                vertical = dimens.spaceXs,
-                            ),
-                        horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-                    ) {
-                        pair.forEach { item ->
-                            QuickPickCard(
-                                item = item,
-                                onClick = { onCollectionClick(item.id) },
-                                modifier = Modifier.weight(1f),
-                            )
+                // Grid built from chunked rows: a LazyVerticalGrid cannot nest in a
+                // LazyColumn, and chunking keeps the screen one scroll container.
+                // Column count comes from the window width, not a constant.
+                state.quickPicks.chunked(layout.gridColumns)
+                    .forEachIndexed { rowIndex, row ->
+                        item(key = "qp_" + row.first().id) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .staggeredEntry(rowIndex)
+                                    .padding(
+                                        horizontal = layout.gutter,
+                                        vertical = dimens.spaceXs,
+                                    ),
+                                horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
+                            ) {
+                                row.forEach { item ->
+                                    QuickPickCard(
+                                        item = item,
+                                        onClick = { onCollectionClick(item.id) },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                // Keeps a short final row aligned with those above.
+                                repeat(layout.gridColumns - row.size) {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
                         }
-                        // Keeps a lone trailing card at half width.
-                        if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
-                }
 
                 item(key = "qp_spacer") {
                     Spacer(Modifier.height(dimens.shelfSpacing))
                 }
             }
 
-            state.sections.forEach { section ->
+            state.sections.forEachIndexed { index, section ->
                 item(key = section.id) {
                     // A LazyColumn item is a single slot, so the block and its
                     // trailing gap need a layout around them.
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .staggeredEntry(index + 2),
+                    ) {
                         HomeSectionBlock(
                             section = section,
+                            layout = layout,
                             onCollectionClick = onCollectionClick,
                         )
                         Spacer(Modifier.height(dimens.shelfSpacing))
@@ -164,6 +217,7 @@ private fun HomeContent(
 @Composable
 private fun HomeHeader(
     state: HomeViewModel.UiState,
+    gutter: androidx.compose.ui.unit.Dp,
     onChipClick: (HomeTab) -> Unit,
     onOpenProfile: () -> Unit,
 ) {
@@ -175,15 +229,15 @@ private fun HomeHeader(
             .padding(top = dimens.spaceMd, bottom = dimens.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Spacer(Modifier.width(dimens.screenGutter))
-        ProfileAvatar(name = state.userName, onClick = onOpenProfile)
+        Spacer(Modifier.width(gutter))
+        ProfileAvatar(name = state.userName, onClick = onOpenProfile, size = 32.dp)
         Spacer(Modifier.width(dimens.spaceMd))
 
         // Built explicitly rather than from a list, because Music and Following
         // are one segmented control, not two independent chips.
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-            contentPadding = PaddingValues(end = dimens.screenGutter),
+            contentPadding = PaddingValues(end = gutter),
         ) {
             item(key = "all") {
                 SpotKofiChip(
@@ -223,6 +277,7 @@ private fun HomeHeader(
 @Composable
 private fun HomeSectionBlock(
     section: HomeSection,
+    layout: ResponsiveLayout,
     onCollectionClick: (String) -> Unit,
 ) {
     val dimens = SpotKofiTheme.dimens
@@ -231,11 +286,15 @@ private fun HomeSectionBlock(
         is HomeSection.Cards -> {
             SectionHeader(title = section.title)
             LazyRow(
-                contentPadding = PaddingValues(horizontal = dimens.screenGutter),
+                contentPadding = PaddingValues(horizontal = layout.gutter),
                 horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
             ) {
                 items(items = section.items, key = { it.id }) { item ->
-                    MediaCard(item = item, onClick = { onCollectionClick(item.id) })
+                    MediaCard(
+                        item = item,
+                        onClick = { onCollectionClick(item.id) },
+                        width = layout.shelfCardWidth,
+                    )
                 }
             }
         }
@@ -243,21 +302,26 @@ private fun HomeSectionBlock(
         is HomeSection.Stations -> {
             SectionHeader(title = section.title)
             LazyRow(
-                contentPadding = PaddingValues(horizontal = dimens.screenGutter),
+                contentPadding = PaddingValues(horizontal = layout.gutter),
                 horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
             ) {
                 items(items = section.items, key = { it.id }) { station ->
-                    StationCard(station = station, onClick = { })
+                    StationCard(
+                        station = station,
+                        onClick = { },
+                        width = layout.shelfCardWidth,
+                    )
                 }
             }
         }
 
         is HomeSection.Spotlight -> {
             SectionHeader(title = section.title)
-            Box(modifier = Modifier.padding(horizontal = dimens.screenGutter)) {
+            Box(modifier = Modifier.padding(horizontal = layout.gutter)) {
                 SpotlightCard(
                     item = section.item,
                     onClick = { onCollectionClick(section.item.id) },
+                    width = layout.spotlightWidth,
                 )
             }
         }
@@ -269,16 +333,18 @@ private fun HomeSectionBlock(
                 style = MaterialTheme.typography.displaySmall,
                 color = SpotKofiTheme.colors.textPrimary,
                 modifier = Modifier.padding(
-                    horizontal = dimens.screenGutter,
+                    horizontal = layout.gutter,
                     vertical = dimens.spaceSm,
                 ),
             )
-            section.items.forEach { release ->
+            section.items.forEachIndexed { index, release ->
                 Box(
-                    modifier = Modifier.padding(
-                        horizontal = dimens.screenGutter,
-                        vertical = dimens.spaceSm,
-                    ),
+                    modifier = Modifier
+                        .staggeredEntry(index)
+                        .padding(
+                            horizontal = layout.gutter,
+                            vertical = dimens.spaceSm,
+                        ),
                 ) {
                     ReleaseCard(
                         release = release,
@@ -299,7 +365,7 @@ private fun HomePreview() {
     SpotKofiTheme {
         HomeContent(
             state = HomeViewModel.UiState(
-                userName = "CHOCO",
+                userName = "kofi_listener",
                 quickPicks = previewQuickPicks(),
                 sections = previewHomeSections(),
                 isLoading = false,
@@ -318,7 +384,7 @@ private fun HomeFollowingPreview() {
     SpotKofiTheme {
         HomeContent(
             state = HomeViewModel.UiState(
-                userName = "CHOCO",
+                userName = "kofi_listener",
                 selectedChip = HomeTab.Music,
                 followingActive = true,
                 sections = previewReleaseSections(),

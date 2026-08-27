@@ -38,8 +38,28 @@ data class SpotKofiDimens(
     val artworkCard: Dp = 156.dp,
     val artworkHeader: Dp = 220.dp,
 
+    // ---- Floating navigation bar ----
+    /**
+     * Minimum height of the bar's content area, excluding its outer margins.
+     *
+     * Treated as a floor, not a fixed height. The item stack is roughly
+     * 34dp glow + 4dp gap + label line + 8dp padding, which already sits close to
+     * this budget at the default font scale and exceeds it once the user enlarges
+     * text. Applied with `heightIn(min = ...)` the bar grows instead of clipping
+     * the labels.
+     */
+    val floatingBarHeight: Dp = 72.dp,
+
+    /** Inset from the left and right screen edges. */
+    val floatingBarMargin: Dp = 14.dp,
+
+    /** Gap between the bar and the navigation-bar inset below it. */
+    val floatingBarGap: Dp = 10.dp,
+
+    /** Corner radius. Large enough to read as a pill at [floatingBarHeight]. */
+    val floatingBarRadius: Dp = 26.dp,
+
     // ---- Components ----
-    val bottomBarHeight: Dp = 60.dp,
     val miniPlayerHeight: Dp = 56.dp,
     val chipHeight: Dp = 34.dp,
     val iconSm: Dp = 18.dp,

@@ -1,7 +1,6 @@
 package com.spotkofi.app.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +25,7 @@ import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
 import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.Playlist
+import com.spotkofi.app.ui.motion.clickableScale
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 /**
@@ -54,7 +54,7 @@ fun MediaCard(
     Column(
         modifier = modifier
             .width(width)
-            .clickable(onClick = onClick)
+            .clickableScale(onClick = onClick)
             .padding(vertical = dimens.spaceXs),
         horizontalAlignment = alignment,
     ) {
@@ -115,7 +115,7 @@ fun QuickPickCard(
             .height(dimens.artworkSmall)
             .clip(shapes.quickPick)
             .background(colors.card)
-            .clickable(onClick = onClick),
+            .clickableScale(pressedScale = 0.97f, onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Artwork(
@@ -159,7 +159,7 @@ fun SpotlightCard(
     Column(
         modifier = modifier
             .width(width)
-            .clickable(onClick = onClick),
+            .clickableScale(onClick = onClick),
     ) {
         Artwork(
             id = item.id,

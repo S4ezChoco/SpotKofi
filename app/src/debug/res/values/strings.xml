@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-variant override.
+
+  A build-type source set shadows the same resource name in `main`, so this needs
+  no resValue plumbing and cannot collide with it.
+
+  The point is to keep the two installed builds distinguishable on the launcher.
+  Debug Compose runs unoptimised and skips frames on startup, so judging animation
+  smoothness on it is misleading; the release build is the one that reflects what
+  users will feel.
+-->
+<resources>
+    <string name="app_name">SpotKofi dev</string>
+</resources>

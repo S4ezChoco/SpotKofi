@@ -2,10 +2,9 @@ package com.spotkofi.app.ui.navigation
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,10 +12,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
@@ -31,96 +32,166 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.spotkofi.app.R
+import com.spotkofi.app.ui.components.MorphIcon
+import com.spotkofi.app.ui.motion.pressScale
+import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 /**
- * Bottom navigation.
+ * Floating navigation island.
  *
- * Deliberately not Material 3's `NavigationBar`: that component brings its own
- * tonal surface, indicator pill and 80dp height. The real bar is shorter, has no
- * selection indicator, and fades into the content above it, so building the row
- * directly is less work than overriding the defaults.
+ * Detached from every screen edge rather than docked. Two reasons beyond looks:
+ * a floating bar cannot have its labels clipped by the gesture area, and it makes
+ * the sheet that grows out of the Create button read as attached to that button
+ * instead of to the bottom of the screen.
+ *
+ * Not Material 3's `NavigationBar`, which is edge-to-edge by construction and
+ * brings its own tonal surface, indicator pill and 80dp height.
  */
 @Composable
 fun SpotKofiBottomBar(
     current: TopLevelDestination,
     onSelect: (TopLevelDestination) -> Unit,
     modifier: Modifier = Modifier,
+    /** True while the Create sheet is open, which turns the plus into a close. */
+    createExpanded: Boolean = false,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+    val shape = RoundedCornerShape(dimens.floatingBarRadius)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(
+                start = dimens.floatingBarMargin,
+                end = dimens.floatingBarMargin,
+                bottom = dimens.floatingBarGap,
+            ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                // Shadow before clip so the halo falls outside the pill. On a dark
+                // background it is barely visible as a shadow, but it separates the
+                // island from artwork scrolling underneath.
+                .shadow(
+                    elevation = 20.dp,
+                    shape = shape,
+                    clip = false,
+                    ambientColor = Color.Black,
+                    spotColor = Color.Black,
+                )
+                .clip(shape)
+                // Slightly translucent so content scrolling behind tints it. A real
+                // blur would need API 31+, and minSdk here is 26.
+                .background(colors.elevated.copy(alpha = 0.97f))
+                .border(1.dp, Color.White.copy(alpha = 0.07f), shape)
+                // heightIn, not height: at large accessibility font scales the
+                // labels need more room, and a fixed height would clip them.
+                .heightIn(min = dimens.floatingBarHeight),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TopLevelDestination.entries.forEach { destination ->
+                // Create is an action. It paints as active while its sheet is open,
+                // which is the visual link between the button and the panel.
+                val selected = if (destination.isAction) {
+                    createExpanded
+                } else {
+                    destination == current
+                }
+
+                NavItem(
+                    destination = destination,
+                    selected = selected,
+                    createExpanded = createExpanded,
+                    onClick = { onSelect(destination) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavItem(
+    destination: TopLevelDestination,
+    selected: Boolean,
+    createExpanded: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
-    Row(
+    val tint by animateColorAsState(
+        targetValue = if (selected) colors.textPrimary else colors.textSecondary,
+        animationSpec = Motion.fast(),
+        label = "navTint",
+    )
+
+    val emphasis by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = Motion.bouncy(),
+        label = "navEmphasis",
+    )
+
+    val interaction = remember { MutableInteractionSource() }
+
+    Column(
         modifier = modifier
-            .fillMaxWidth()
-            // Order matters here. The background is applied before the inset so it
-            // paints all the way through the gesture area, then the inset pushes
-            // only the icons and labels up. Padding the bar from the outside
-            // instead leaves a visible strip of app background below it.
-            .background(
-                // Vertical fade so scrolled content dissolves into the bar
-                // instead of ending on a hard edge.
-                Brush.verticalGradient(
-                    listOf(Color.Transparent, colors.base, colors.base),
-                ),
+            .selectable(
+                selected = selected,
+                interactionSource = interaction,
+                // No ripple: the press is expressed by scale, which survives on
+                // artwork and tinted surfaces where a ripple would not.
+                indication = null,
+                onClick = onClick,
             )
-            .navigationBarsPadding()
-            .height(dimens.bottomBarHeight),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
+            .pressScale(interaction, pressedScale = 0.86f)
+            .padding(vertical = dimens.spaceXs),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        TopLevelDestination.entries.forEach { destination ->
-            // Create is an action, so it never paints as selected.
-            val selected = !destination.isAction && destination == current
-
-            val tint by animateColorAsState(
-                targetValue = if (selected) colors.textPrimary else colors.textSecondary,
-                animationSpec = tween(200),
-                label = "navTint",
-            )
-
-            val interaction = remember { MutableInteractionSource() }
-            val pressed by interaction.collectIsPressedAsState()
-            val scale by animateFloatAsState(
-                targetValue = if (pressed) 0.86f else 1f,
-                animationSpec = tween(110),
-                label = "navPressScale",
-            )
-
-            Column(
+        Box(contentAlignment = Alignment.Center) {
+            // Soft glow behind the active icon. Cheap depth cue that avoids the
+            // heavy pill indicator Material 3 would draw.
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .selectable(
-                        selected = selected,
-                        interactionSource = interaction,
-                        // No ripple: the bar has no item background for one to
-                        // land on, so the press is expressed by the scale instead.
-                        indication = null,
-                        onClick = { onSelect(destination) },
-                    )
-                    .padding(vertical = dimens.spaceSm),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Box(modifier = Modifier.scale(scale)) {
-                    NavIcon(destination = destination, selected = selected, tint = tint)
-                }
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = stringResource(destination.labelRes),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = tint,
-                )
-            }
+                    .size(34.dp)
+                    .graphicsLayer { alpha = emphasis * 0.18f }
+                    .background(colors.accent, SpotKofiTheme.shapes.avatar),
+            )
+
+            NavIcon(
+                destination = destination,
+                selected = selected,
+                createExpanded = createExpanded,
+                tint = tint,
+            )
         }
+
+        Spacer(Modifier.height(4.dp))
+
+        Text(
+            text = stringResource(destination.labelRes),
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -129,47 +200,64 @@ fun SpotKofiBottomBar(
  * drawable resource while the others use Material vectors, and the enum should
  * not have to model both.
  *
- * `contentDescription` is null throughout: the label directly below already
- * names the item, and announcing both would read it twice.
+ * `contentDescription` is null throughout: the label directly below already names
+ * the item, and announcing both would read it twice.
  */
 @Composable
 private fun NavIcon(
     destination: TopLevelDestination,
     selected: Boolean,
+    createExpanded: Boolean,
     tint: Color,
 ) {
     val size = SpotKofiTheme.dimens.iconMd
 
     when (destination) {
-        TopLevelDestination.Home -> Icon(
-            imageVector = if (selected) Icons.Filled.Home else Icons.Outlined.Home,
+        TopLevelDestination.Home -> MorphIcon(
+            selected = selected,
+            selectedIcon = Icons.Filled.Home,
+            unselectedIcon = Icons.Outlined.Home,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(size),
+            size = size,
         )
 
-        TopLevelDestination.Search -> Icon(
-            imageVector = if (selected) Icons.Filled.Search else Icons.Outlined.Search,
+        TopLevelDestination.Search -> MorphIcon(
+            selected = selected,
+            selectedIcon = Icons.Filled.Search,
+            unselectedIcon = Icons.Outlined.Search,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(size),
+            size = size,
         )
 
-        TopLevelDestination.Library -> Icon(
-            painter = painterResource(
-                if (selected) R.drawable.ic_nav_library_filled else R.drawable.ic_nav_library,
-            ),
+        TopLevelDestination.Library -> MorphIcon(
+            selected = selected,
+            selectedPainter = painterResource(R.drawable.ic_nav_library_filled),
+            unselectedPainter = painterResource(R.drawable.ic_nav_library),
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(size),
+            size = size,
         )
 
-        TopLevelDestination.Create -> Icon(
-            imageVector = Icons.Filled.Add,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(size),
-        )
+        // A plus turned 45 degrees IS a cross, so the same glyph becomes the close
+        // control. That is the whole trick: there is no second button appearing
+        // somewhere else, the button you pressed is the button you press again.
+        TopLevelDestination.Create -> {
+            val rotation by animateFloatAsState(
+                targetValue = if (createExpanded) 45f else 0f,
+                animationSpec = Motion.bouncy(),
+                label = "createRotation",
+            )
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier
+                    .size(size)
+                    .graphicsLayer { rotationZ = rotation },
+            )
+        }
     }
 }
 
@@ -178,5 +266,17 @@ private fun NavIcon(
 private fun SpotKofiBottomBarPreview() {
     SpotKofiTheme {
         SpotKofiBottomBar(current = TopLevelDestination.Home, onSelect = {})
+    }
+}
+
+@Preview(name = "Create open", backgroundColor = 0xFF121212, showBackground = true)
+@Composable
+private fun SpotKofiBottomBarCreateOpenPreview() {
+    SpotKofiTheme {
+        SpotKofiBottomBar(
+            current = TopLevelDestination.Home,
+            onSelect = {},
+            createExpanded = true,
+        )
     }
 }

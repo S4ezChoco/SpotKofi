@@ -51,6 +51,8 @@ import com.spotkofi.app.data.model.FriendActivity
 import com.spotkofi.app.data.repository.previewConversations
 import com.spotkofi.app.data.repository.previewFriends
 import com.spotkofi.app.ui.components.Artwork
+import com.spotkofi.app.ui.motion.clickableScale
+import com.spotkofi.app.ui.motion.staggeredEntry
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 /**
@@ -108,14 +110,14 @@ fun ProfileDrawer(
         Spacer(Modifier.height(dimens.spaceSm))
 
         // ---- Account menu ----
-        DrawerRow(Icons.Filled.Add, "Add account") { }
+        DrawerRow(Icons.Filled.Add, "Add account", index = 0) { }
         // No subscription tier shown: there is no account system yet, so a plan
         // badge here would be inventing state the app does not have.
-        DrawerRow(Icons.Filled.WorkspacePremium, "Subscription") { }
-        DrawerRow(Icons.Filled.ShowChart, "Listening stats") { }
-        DrawerRow(Icons.Filled.History, "Recents") { }
-        DrawerRow(Icons.Filled.Campaign, "Your Updates") { }
-        DrawerRow(Icons.Filled.Settings, "Settings and privacy", onClick = onSettings)
+        DrawerRow(Icons.Filled.WorkspacePremium, "Subscription", index = 1) { }
+        DrawerRow(Icons.Filled.ShowChart, "Listening stats", index = 2) { }
+        DrawerRow(Icons.Filled.History, "Recents", index = 3) { }
+        DrawerRow(Icons.Filled.Campaign, "Your Updates", index = 4) { }
+        DrawerRow(Icons.Filled.Settings, "Settings and privacy", index = 5, onClick = onSettings)
 
         Spacer(Modifier.height(dimens.spaceLg))
 
@@ -169,8 +171,8 @@ fun ProfileDrawer(
 
         Spacer(Modifier.height(dimens.spaceSm))
 
-        conversations.forEach { conversation ->
-            ConversationRow(conversation)
+        conversations.forEachIndexed { index, conversation ->
+            ConversationRow(conversation, index = index + 6)
         }
 
         // ---- New message ----
@@ -208,6 +210,7 @@ fun ProfileDrawer(
 private fun DrawerRow(
     icon: ImageVector,
     label: String,
+    index: Int,
     onClick: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
@@ -216,20 +219,28 @@ private fun DrawerRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .staggeredEntry(index, slide = 12.dp)
+            .clickableScale(pressedScale = 0.98f, onClick = onClick)
             .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = colors.textPrimary,
-            modifier = Modifier.size(dimens.iconMd),
-        )
-        Spacer(Modifier.width(dimens.spaceLg))
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .background(colors.iconWell, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = colors.textPrimary,
+                modifier = Modifier.size(dimens.iconSm),
+            )
+        }
+        Spacer(Modifier.width(dimens.spaceMd))
         Text(
             text = label,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleMedium,
             color = colors.textPrimary,
             modifier = Modifier.weight(1f),
         )
@@ -328,14 +339,15 @@ private fun InviteBubble() {
 }
 
 @Composable
-private fun ConversationRow(conversation: Conversation) {
+private fun ConversationRow(conversation: Conversation, index: Int) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { /* Phase 4: open the thread */ }
+            .staggeredEntry(index, slide = 12.dp)
+            .clickableScale(pressedScale = 0.98f) { /* Phase 4: open the thread */ }
             .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {

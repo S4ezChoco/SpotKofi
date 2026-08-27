@@ -6,6 +6,7 @@ import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,10 +33,17 @@ class CollectionViewModel(
 
     init {
         viewModelScope.launch {
-            val collection = repository.collection(collectionId)
-            val tracks = repository.tracks(collectionId)
+            // Concurrent, not sequential. The two lookups are independent, so
+            // awaiting them one after the other doubled the time to first paint
+            // for no reason.
+            val collection = async { repository.collection(collectionId) }
+            val tracks = async { repository.tracks(collectionId) }
             _uiState.update {
-                it.copy(collection = collection, tracks = tracks, isLoading = false)
+                it.copy(
+                    collection = collection.await(),
+                    tracks = tracks.await(),
+                    isLoading = false,
+                )
             }
         }
     }

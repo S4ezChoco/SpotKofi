@@ -2,6 +2,7 @@ package com.spotkofi.app.ui.theme
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /*
@@ -116,6 +117,19 @@ data class SpotKofiColors(
     val accentDim: Color = KofiGreenDim,
     val onAccent: Color = OnGreen,
     val explicit: Color = ExplicitGrey,
+)
+
+/**
+ * A translucent wash used behind screen headers.
+ *
+ * Fading a hint of the accent, or of the current artwork, into the top of a
+ * screen is what stops a pure #121212 background from looking flat. Kept very low
+ * alpha so it never competes with cover art.
+ */
+fun headerWash(tint: Color): Brush = Brush.verticalGradient(
+    0f to tint.copy(alpha = 0.30f),
+    0.55f to tint.copy(alpha = 0.08f),
+    1f to Color.Transparent,
 )
 
 val LocalSpotKofiColors = staticCompositionLocalOf { SpotKofiColors() }

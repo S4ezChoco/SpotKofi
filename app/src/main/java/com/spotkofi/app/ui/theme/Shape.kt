@@ -32,13 +32,22 @@ data class SpotKofiShapeTokens(
     val avatar: Shape = CircleShape,
 
     /** Cards in the "quick picks" grid on Home. */
-    val quickPick: Shape = RoundedCornerShape(4.dp),
+    val quickPick: Shape = RoundedCornerShape(8.dp),
 
-    /** Release cards and the large Search category tiles. */
-    val card: Shape = RoundedCornerShape(8.dp),
+    /**
+     * Release cards and the large Search category tiles.
+     *
+     * Softer than the artwork radius on purpose: chrome is allowed to look
+     * modern and rounded, while cover art stays nearly square so it reads as
+     * photography rather than as a widget.
+     */
+    val card: Shape = RoundedCornerShape(14.dp),
 
     /** Station tiles and Explore thumbnails. */
-    val tile: Shape = RoundedCornerShape(6.dp),
+    val tile: Shape = RoundedCornerShape(10.dp),
+
+    /** Grouped rows, e.g. a settings section. */
+    val group: Shape = RoundedCornerShape(16.dp),
 
     /** Filter pills and genre chips. */
     val chip: Shape = RoundedCornerShape(percent = 50),
@@ -50,10 +59,10 @@ data class SpotKofiShapeTokens(
     val searchField: Shape = RoundedCornerShape(8.dp),
 
     /** Mini player bar. */
-    val miniPlayer: Shape = RoundedCornerShape(6.dp),
+    val miniPlayer: Shape = RoundedCornerShape(10.dp),
 
     /** Bottom sheets and dialogs. */
-    val sheet: Shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+    val sheet: Shape = RoundedCornerShape(18.dp),
 )
 
 val LocalSpotKofiShapes = staticCompositionLocalOf { SpotKofiShapeTokens() }

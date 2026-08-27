@@ -24,9 +24,13 @@ data object LibraryRoute
 @Serializable
 data class CollectionRoute(val id: String)
 
-/** Full-screen player, presented over the tab content. */
-@Serializable
-data object NowPlayingRoute
+/*
+ * There is no NowPlaying route on purpose.
+ *
+ * The player is a full-screen overlay owned by SpotKofiApp, not a destination. As
+ * a destination the screen behind it is not composed, so dragging the player down
+ * revealed empty background instead of the tab it was opened from.
+ */
 
 @Serializable
 data object SettingsRoute

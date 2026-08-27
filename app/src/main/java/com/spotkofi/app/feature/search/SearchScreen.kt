@@ -1,7 +1,17 @@
 package com.spotkofi.app.feature.search
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +41,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +68,11 @@ import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.SectionHeader
 import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.components.artworkSeedColor
+import com.spotkofi.app.ui.layout.ResponsiveLayout
+import com.spotkofi.app.ui.layout.rememberResponsiveLayout
+import com.spotkofi.app.ui.motion.clickableScale
+import com.spotkofi.app.ui.motion.staggeredEntry
+import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 @Composable
@@ -95,19 +111,23 @@ private fun SearchContent(
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
-    val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
+    val layout = rememberResponsiveLayout()
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = contentPadding,
-    ) {
-        item(key = "header") {
+    Column(modifier = modifier.fillMaxSize()) {
+        // Header and field are pinned rather than scrolled away. Once someone is
+        // typing, having the field leave the screen is the single most annoying
+        // thing a search UI can do.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = contentPadding.calculateTopPadding()),
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
-                        start = dimens.screenGutter,
+                        start = layout.gutter,
                         end = dimens.spaceSm,
                         top = dimens.spaceLg,
                         bottom = dimens.spaceMd,
@@ -119,126 +139,222 @@ private fun SearchContent(
                 Text(
                     text = "Search",
                     style = MaterialTheme.typography.displaySmall,
-                    color = colors.textPrimary,
+                    color = SpotKofiTheme.colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = { /* Phase 5: scan a code or cover */ }) {
                     Icon(
                         imageVector = Icons.Filled.PhotoCamera,
                         contentDescription = stringResource(R.string.cd_camera_search),
-                        tint = colors.textPrimary,
+                        tint = SpotKofiTheme.colors.textPrimary,
                         modifier = Modifier.size(dimens.iconMd),
                     )
                 }
             }
+
+            SearchField(
+                query = state.query,
+                gutter = layout.gutter,
+                onQueryChange = onQueryChange,
+                onClear = onClearQuery,
+            )
+
+            Spacer(Modifier.height(dimens.spaceLg))
         }
 
-        item(key = "field") {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                SearchField(
-                    query = state.query,
-                    onQueryChange = onQueryChange,
-                    onClear = onClearQuery,
+        // Browse and results are different screens conceptually, so they cross-
+        // fade with a slight vertical offset instead of items popping in place.
+        AnimatedContent(
+            targetState = state.showBrowse,
+            transitionSpec = {
+                val enter = fadeIn(Motion.medium()) +
+                    slideInVertically(Motion.medium()) { it / 14 }
+                val exit = fadeOut(Motion.fast()) +
+                    slideOutVertically(Motion.fast()) { -it / 14 }
+                enter togetherWith exit
+            },
+            label = "searchMode",
+            modifier = Modifier.fillMaxSize(),
+        ) { browsing ->
+            if (browsing) {
+                BrowseList(
+                    state = state,
+                    layout = layout,
+                    contentPadding = contentPadding,
                 )
-                Spacer(Modifier.height(dimens.spaceLg))
+            } else {
+                ResultsList(
+                    state = state,
+                    layout = layout,
+                    contentPadding = contentPadding,
+                    onCollectionClick = onCollectionClick,
+                    onTrackClick = onTrackClick,
+                )
             }
         }
+    }
+}
 
-        if (state.showBrowse) {
-            // Four large tiles, two per row.
-            items(
-                items = state.categories.chunked(2),
-                key = { pair -> "tc_" + pair.first().id },
-            ) { pair ->
+/* ------------------------------------------------------------------ browse -- */
+
+@Composable
+private fun BrowseList(
+    state: SearchViewModel.UiState,
+    layout: ResponsiveLayout,
+    contentPadding: PaddingValues,
+) {
+    val dimens = SpotKofiTheme.dimens
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+    ) {
+        item(key = "browse_header") { SectionHeader(title = "Browse all") }
+
+        state.categories.chunked(layout.tileColumns).forEachIndexed { rowIndex, row ->
+            item(key = "tc_" + row.first().id) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(
-                            horizontal = dimens.screenGutter,
-                            vertical = dimens.spaceXs,
-                        ),
+                        .staggeredEntry(rowIndex)
+                        .padding(horizontal = layout.gutter, vertical = dimens.spaceXs),
                     horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
                 ) {
-                    pair.forEach { category ->
+                    row.forEach { category ->
                         TopCategoryTile(
                             category = category,
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    repeat(layout.tileColumns - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
+        }
 
-            // Each LazyColumn item is one slot, so multi-part blocks are wrapped.
-            item(key = "videos") {
+        item(key = "videos") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .staggeredEntry(4),
+            ) {
+                Spacer(Modifier.height(dimens.shelfSpacing))
+                SectionHeader(title = "Explore music videos")
+                ExploreShelf(items = state.videos, tall = true, gutter = layout.gutter)
+            }
+        }
+
+        item(key = "episodes") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .staggeredEntry(5),
+            ) {
+                Spacer(Modifier.height(dimens.shelfSpacing))
+                SectionHeader(title = "Explore episodes for you")
+                ExploreShelf(items = state.episodes, tall = false, gutter = layout.gutter)
+                Spacer(Modifier.height(dimens.shelfSpacing))
+            }
+        }
+    }
+}
+
+/* ----------------------------------------------------------------- results -- */
+
+@Composable
+private fun ResultsList(
+    state: SearchViewModel.UiState,
+    layout: ResponsiveLayout,
+    contentPadding: PaddingValues,
+    onCollectionClick: (String) -> Unit,
+    onTrackClick: (Track) -> Unit,
+) {
+    val dimens = SpotKofiTheme.dimens
+    val results = state.results
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+    ) {
+        if (results.isEmpty && !state.isSearching) {
+            item(key = "empty") { EmptyResults(query = state.query) }
+        }
+
+        if (results.collections.isNotEmpty()) {
+            item(key = "col_header") { SectionHeader(title = "Playlists, albums & artists") }
+            item(key = "col_row") {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Spacer(Modifier.height(dimens.shelfSpacing))
-                    SectionHeader(title = "Explore music videos")
-                    ExploreShelf(items = state.videos, tall = true)
-                }
-            }
-
-            item(key = "episodes") {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Spacer(Modifier.height(dimens.shelfSpacing))
-                    SectionHeader(title = "Explore episodes for you")
-                    ExploreShelf(items = state.episodes, tall = false)
-                    Spacer(Modifier.height(dimens.shelfSpacing))
-                }
-            }
-        } else {
-            val results = state.results
-
-            if (results.isEmpty && !state.isSearching) {
-                item(key = "empty") { EmptyResults(query = state.query) }
-            }
-
-            if (results.collections.isNotEmpty()) {
-                item(key = "col_header") { SectionHeader(title = "Playlists, albums & artists") }
-                item(key = "col_row") {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = dimens.screenGutter),
-                            horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
-                        ) {
-                            items(items = results.collections, key = { it.id }) { item ->
-                                MediaCard(item = item, onClick = { onCollectionClick(item.id) })
-                            }
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = layout.gutter),
+                        horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
+                    ) {
+                        items(items = results.collections, key = { it.id }) { item ->
+                            MediaCard(
+                                item = item,
+                                onClick = { onCollectionClick(item.id) },
+                                width = layout.shelfCardWidth,
+                            )
                         }
-                        Spacer(Modifier.height(dimens.spaceLg))
                     }
+                    Spacer(Modifier.height(dimens.spaceLg))
                 }
             }
+        }
 
-            if (results.tracks.isNotEmpty()) {
-                item(key = "tr_header") { SectionHeader(title = "Songs") }
-                items(items = results.tracks, key = { it.id }) { track ->
-                    TrackRow(
-                        track = track,
-                        onClick = { onTrackClick(track) },
-                        trailingText = track.durationMs.asTrackDuration(),
-                    )
+        if (results.tracks.isNotEmpty()) {
+            item(key = "tr_header") { SectionHeader(title = "Songs") }
+            results.tracks.forEachIndexed { index, track ->
+                item(key = track.id) {
+                    Box(modifier = Modifier.staggeredEntry(index)) {
+                        TrackRow(
+                            track = track,
+                            onClick = { onTrackClick(track) },
+                            trailingText = track.durationMs.asTrackDuration(),
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/* ------------------------------------------------------------------- field -- */
+
 @Composable
 private fun SearchField(
     query: String,
+    gutter: androidx.compose.ui.unit.Dp,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+
+    // A growing accent ring is the focus affordance. It does not rely on colour
+    // alone, so it still reads for anyone who cannot distinguish the green.
+    val ringWidth by animateDpAsState(
+        targetValue = if (focused) 2.5.dp else 0.dp,
+        animationSpec = Motion.snappy(),
+        label = "searchRing",
+    )
+    val ringColor by animateColorAsState(
+        targetValue = if (focused) colors.accent else Color.Transparent,
+        animationSpec = Motion.fast(),
+        label = "searchRingColor",
+    )
 
     TextField(
         value = query,
         onValueChange = onQueryChange,
+        interactionSource = interaction,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = dimens.screenGutter),
+            .padding(horizontal = gutter)
+            .border(
+                width = ringWidth,
+                color = ringColor,
+                shape = SpotKofiTheme.shapes.searchField,
+            ),
         placeholder = {
             Text(
                 text = "What do you want to listen to?",
@@ -283,6 +399,8 @@ private fun SearchField(
     )
 }
 
+/* ------------------------------------------------------------------- tiles -- */
+
 /**
  * Fixed hues for the four headline categories.
  *
@@ -311,7 +429,7 @@ private fun TopCategoryTile(
             .aspectRatio(1.75f)
             .clip(SpotKofiTheme.shapes.card)
             .background(categoryColor(category.id))
-            .clickable { /* Phase 5: category browse */ },
+            .clickableScale(pressedScale = 0.96f) { /* Phase 5: category browse */ },
     ) {
         Text(
             text = category.name,
@@ -337,16 +455,24 @@ private fun TopCategoryTile(
 }
 
 @Composable
-private fun ExploreShelf(items: List<ExploreItem>, tall: Boolean) {
+private fun ExploreShelf(
+    items: List<ExploreItem>,
+    tall: Boolean,
+    gutter: androidx.compose.ui.unit.Dp,
+) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
     LazyRow(
-        contentPadding = PaddingValues(horizontal = dimens.screenGutter),
+        contentPadding = PaddingValues(horizontal = gutter),
         horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
     ) {
         items(items = items, key = { it.id }) { item ->
-            Column(modifier = Modifier.width(148.dp)) {
+            Column(
+                modifier = Modifier
+                    .width(148.dp)
+                    .clickableScale { },
+            ) {
                 Box {
                     Artwork(
                         id = item.id,
@@ -406,7 +532,7 @@ private fun SearchPreview() {
     SpotKofiTheme {
         SearchContent(
             state = SearchViewModel.UiState(
-                userName = "CHOCO",
+                userName = "kofi_listener",
                 categories = previewTopCategories(),
                 videos = previewExploreVideos(),
                 episodes = previewExploreEpisodes(),

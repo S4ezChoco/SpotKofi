@@ -1,12 +1,16 @@
 package com.spotkofi.app.feature.player
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,13 +60,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,12 +92,21 @@ import com.spotkofi.app.data.repository.previewTrack
 import com.spotkofi.app.data.repository.previewTrackDetails
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.artworkSeedColor
+import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
+import kotlinx.coroutines.launch
+
+/** Downward fling speed, in px/s, that dismisses regardless of distance dragged. */
+private const val DISMISS_VELOCITY = 1200f
 
 @Composable
 fun NowPlayingScreen(
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Raw vertical drag delta, in px, from the hero artwork. */
+    onDrag: (Float) -> Unit = {},
+    /** Fling velocity in px/s when the finger lifts. */
+    onDragStopped: (Float) -> Unit = {},
 ) {
     val container = LocalAppContainer.current
     val viewModel: NowPlayingViewModel = viewModel {
@@ -102,6 +119,8 @@ fun NowPlayingScreen(
         state = state,
         details = details,
         onCollapse = onCollapse,
+        onDrag = onDrag,
+        onDragStopped = onDragStopped,
         onTogglePlayPause = viewModel::onTogglePlayPause,
         onNext = viewModel::onNext,
         onPrevious = viewModel::onPrevious,
@@ -118,6 +137,8 @@ private fun NowPlayingContent(
     state: PlaybackState,
     details: TrackDetails?,
     onCollapse: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragStopped: (Float) -> Unit,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -160,6 +181,14 @@ private fun NowPlayingContent(
     // The compact bar takes over once the hero has scrolled past.
     val collapsed by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
 
+    // This screen deliberately owns NO drag position.
+    //
+    // It used to keep its own `dragPx`, which meant two sources of truth: this
+    // one and the host's blur progress. If the composable was reused before its
+    // exit finished, the stale offset left the page parked off-screen while the
+    // host still believed it was open, so the blur stuck on with nothing visible.
+    // The host now owns the single position value and this screen only forwards
+    // gestures.
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -178,6 +207,8 @@ private fun NowPlayingContent(
                         contextLabel = details?.contextLabel.orEmpty(),
                         activeLyric = details?.lyrics?.activeLine(),
                         onCollapse = onCollapse,
+                        onDrag = onDrag,
+                        onDragStopped = onDragStopped,
                     )
                 }
             }
@@ -278,14 +309,23 @@ private fun HeroArtwork(
     contextLabel: String,
     activeLyric: String?,
     onCollapse: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragStopped: (Float) -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
+    val dragState = rememberDraggableState { delta -> onDrag(delta) }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(0.82f),
+            .aspectRatio(0.82f)
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Vertical,
+                onDragStopped = { velocity -> onDragStopped(velocity) },
+            ),
     ) {
         Artwork(
             id = track.id,
@@ -1112,6 +1152,8 @@ private fun NowPlayingPreview() {
             ),
             details = previewTrackDetails(),
             onCollapse = {},
+            onDrag = {},
+            onDragStopped = {},
             onTogglePlayPause = {},
             onNext = {},
             onPrevious = {},

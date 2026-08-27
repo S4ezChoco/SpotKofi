@@ -1,7 +1,6 @@
 package com.spotkofi.app.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,8 +26,10 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.spotkofi.app.data.model.Station
+import com.spotkofi.app.ui.motion.clickableScale
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 /**
@@ -45,6 +46,7 @@ fun StationCard(
     station: Station,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    width: Dp = SpotKofiTheme.dimens.artworkCard,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -57,14 +59,14 @@ fun StationCard(
         if (panel.luminance() > 0.45f) Color(0xFF121212) else Color.White
     }
 
-    Column(modifier = modifier.width(dimens.artworkCard)) {
+    Column(modifier = modifier.width(width)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(SpotKofiTheme.shapes.tile)
                 .background(panel)
-                .clickable(onClick = onClick),
+                .clickableScale(onClick = onClick),
         ) {
             // Brand dot, standing in for the service logo.
             Box(

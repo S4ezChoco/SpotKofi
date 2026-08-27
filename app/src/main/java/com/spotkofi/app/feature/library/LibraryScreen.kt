@@ -1,6 +1,14 @@
 package com.spotkofi.app.feature.library
 
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -48,6 +57,11 @@ import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.SpotKofiChip
+import com.spotkofi.app.ui.layout.ResponsiveLayout
+import com.spotkofi.app.ui.layout.rememberResponsiveLayout
+import com.spotkofi.app.ui.motion.clickableScale
+import com.spotkofi.app.ui.motion.staggeredEntry
+import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 @Composable
@@ -91,17 +105,21 @@ private fun LibraryContent(
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
+    val layout = rememberResponsiveLayout()
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = contentPadding,
-    ) {
-        item(key = "header") {
+    Column(modifier = modifier.fillMaxSize()) {
+        // Header, filters and the sort row stay put; only the collection below
+        // them animates when the view mode changes.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = contentPadding.calculateTopPadding()),
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
-                        start = dimens.screenGutter,
+                        start = layout.gutter,
                         end = dimens.spaceSm,
                         top = dimens.spaceLg,
                         bottom = dimens.spaceMd,
@@ -133,128 +151,202 @@ private fun LibraryContent(
                     )
                 }
             }
-        }
 
-        item(key = "filters") {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = dimens.screenGutter),
-                    horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-                ) {
-                    items(items = LibraryViewModel.Filter.entries, key = { it.name }) { filter ->
-                        SpotKofiChip(
-                            label = filter.label,
-                            selected = state.filter == filter,
-                            onClick = { onFilterClick(filter) },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(dimens.spaceLg))
-            }
-        }
-
-        item(key = "sortrow") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = dimens.screenGutter),
-                verticalAlignment = Alignment.CenterVertically,
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = layout.gutter),
+                horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
             ) {
-                Row(
-                    modifier = Modifier
-                        .clickable(onClick = onCycleSort)
-                        .padding(vertical = dimens.spaceSm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.SwapVert,
-                        contentDescription = null,
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(dimens.iconMd),
-                    )
-                    Spacer(Modifier.width(dimens.spaceXs))
-                    Text(
-                        text = state.sortMode.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = colors.textPrimary,
-                    )
-                }
-
-                Spacer(Modifier.weight(1f))
-
-                IconButton(onClick = onToggleViewMode) {
-                    Icon(
-                        imageVector = if (state.viewMode == LibraryViewModel.ViewMode.List) {
-                            Icons.Filled.GridView
-                        } else {
-                            Icons.Filled.ViewList
-                        },
-                        contentDescription = stringResource(R.string.cd_toggle_view),
-                        tint = colors.textPrimary,
-                        modifier = Modifier.size(dimens.iconMd),
+                items(items = LibraryViewModel.Filter.entries, key = { it.name }) { filter ->
+                    SpotKofiChip(
+                        label = filter.label,
+                        selected = state.filter == filter,
+                        onClick = { onFilterClick(filter) },
                     )
                 }
             }
+
+            Spacer(Modifier.height(dimens.spaceLg))
+
+            SortRow(
+                sortMode = state.sortMode,
+                viewMode = state.viewMode,
+                gutter = layout.gutter,
+                onCycleSort = onCycleSort,
+                onToggleViewMode = onToggleViewMode,
+            )
         }
 
         if (state.isLoading) {
-            item(key = "loading") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(240.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = colors.accent)
-                }
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(color = colors.accent)
             }
-            return@LazyColumn
+            return@Column
         }
 
-        val visible = state.visibleItems
+        // Switching between list and grid is a genuine layout change, so it gets a
+        // crossfade with a small scale rather than items teleporting.
+        AnimatedContent(
+            targetState = state.viewMode,
+            transitionSpec = {
+                val enter = fadeIn(Motion.medium()) + scaleIn(Motion.medium(), initialScale = 0.94f)
+                val exit = fadeOut(Motion.fast()) + scaleOut(Motion.fast(), targetScale = 1.04f)
+                enter togetherWith exit
+            },
+            label = "libraryViewMode",
+            modifier = Modifier.fillMaxSize(),
+        ) { viewMode ->
+            LibraryCollection(
+                items = state.visibleItems,
+                viewMode = viewMode,
+                layout = layout,
+                contentPadding = contentPadding,
+                onCollectionClick = onCollectionClick,
+            )
+        }
+    }
+}
 
-        if (visible.isEmpty()) {
-            item(key = "empty") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(dimens.spaceHuge),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "Nothing here yet",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = colors.textSecondary,
-                    )
-                }
+@Composable
+private fun SortRow(
+    sortMode: LibraryViewModel.SortMode,
+    viewMode: LibraryViewModel.ViewMode,
+    gutter: androidx.compose.ui.unit.Dp,
+    onCycleSort: () -> Unit,
+    onToggleViewMode: () -> Unit,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = gutter),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .clickableScale(pressedScale = 0.95f, onClick = onCycleSort)
+                .padding(vertical = dimens.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.SwapVert,
+                contentDescription = null,
+                tint = colors.textPrimary,
+                modifier = Modifier.size(dimens.iconMd),
+            )
+            Spacer(Modifier.width(dimens.spaceXs))
+            // The label slides so the change registers as "the sort moved on",
+            // not as a silent text swap.
+            AnimatedContent(
+                targetState = sortMode,
+                transitionSpec = {
+                    val enter = slideInVertically(Motion.snappy()) { it } + fadeIn(Motion.fast())
+                    val exit = slideOutVertically(Motion.snappy()) { -it } + fadeOut(Motion.fast())
+                    enter togetherWith exit
+                },
+                label = "sortLabel",
+            ) { mode ->
+                Text(
+                    text = mode.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.textPrimary,
+                )
             }
-        } else if (state.viewMode == LibraryViewModel.ViewMode.Grid) {
-            items(
-                items = visible.chunked(2),
-                key = { pair -> "g_" + pair.first().id },
-            ) { pair ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal = dimens.screenGutter,
-                            vertical = dimens.spaceSm,
-                        ),
-                    horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
-                ) {
-                    pair.forEach { item ->
-                        MediaCard(
-                            item = item,
-                            onClick = { onCollectionClick(item.id) },
-                            modifier = Modifier.weight(1f),
-                        )
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        // Rotates a quarter turn as it swaps, so the two icons feel like one
+        // control changing state.
+        val iconSpin by animateFloatAsState(
+            targetValue = if (viewMode == LibraryViewModel.ViewMode.Grid) 90f else 0f,
+            animationSpec = Motion.bouncy(),
+            label = "viewModeSpin",
+        )
+
+        IconButton(onClick = onToggleViewMode) {
+            Icon(
+                imageVector = if (viewMode == LibraryViewModel.ViewMode.List) {
+                    Icons.Filled.GridView
+                } else {
+                    Icons.Filled.ViewList
+                },
+                contentDescription = stringResource(R.string.cd_toggle_view),
+                tint = colors.textPrimary,
+                modifier = Modifier
+                    .size(dimens.iconMd)
+                    .graphicsLayer { rotationZ = iconSpin },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryCollection(
+    items: List<MediaCollection>,
+    viewMode: LibraryViewModel.ViewMode,
+    layout: ResponsiveLayout,
+    contentPadding: PaddingValues,
+    onCollectionClick: (String) -> Unit,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+
+    if (items.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(dimens.spaceHuge),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "Nothing here yet",
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.textSecondary,
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+    ) {
+        if (viewMode == LibraryViewModel.ViewMode.Grid) {
+            items.chunked(layout.gridColumns).forEachIndexed { rowIndex, row ->
+                item(key = "g_" + row.first().id) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .staggeredEntry(rowIndex)
+                            .padding(horizontal = layout.gutter, vertical = dimens.spaceSm),
+                        horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
+                    ) {
+                        row.forEach { item ->
+                            MediaCard(
+                                item = item,
+                                onClick = { onCollectionClick(item.id) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(layout.gridColumns - row.size) { Spacer(Modifier.weight(1f)) }
                     }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         } else {
-            items(items = visible, key = { it.id }) { item ->
-                LibraryRow(item = item, onClick = { onCollectionClick(item.id) })
+            items.forEachIndexed { index, item ->
+                item(key = item.id) {
+                    LibraryRow(
+                        item = item,
+                        gutter = layout.gutter,
+                        onClick = { onCollectionClick(item.id) },
+                        modifier = Modifier.staggeredEntry(index),
+                    )
+                }
             }
         }
     }
@@ -263,17 +355,19 @@ private fun LibraryContent(
 @Composable
 private fun LibraryRow(
     item: MediaCollection,
+    gutter: androidx.compose.ui.unit.Dp,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
     val isPinned = (item as? Playlist)?.isPinned == true
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = dimens.screenGutter, vertical = dimens.spaceSm),
+            .clickableScale(pressedScale = 0.98f, onClick = onClick)
+            .padding(horizontal = gutter, vertical = dimens.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Artwork(
@@ -324,7 +418,7 @@ private fun LibraryPreview() {
     SpotKofiTheme {
         LibraryContent(
             state = LibraryViewModel.UiState(items = previewLibrary(), isLoading = false),
-            userName = "CHOCO",
+            userName = "kofi_listener",
             onFilterClick = {},
             onCycleSort = {},
             onToggleViewMode = {},
