@@ -38,6 +38,7 @@ import com.spotkofi.app.data.repository.previewHomeSections
 import com.spotkofi.app.data.repository.previewQuickPicks
 import com.spotkofi.app.data.repository.previewReleaseSections
 import com.spotkofi.app.ui.components.MediaCard
+import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.QuickPickCard
 import com.spotkofi.app.ui.components.ReleaseCard
@@ -71,6 +72,7 @@ fun HomeScreen(
         onChipClick = viewModel::onChipClick,
         onCollectionClick = onCollectionClick,
         onOpenProfile = onOpenProfile,
+        onRetry = viewModel::retry,
         contentPadding = contentPadding,
         modifier = modifier,
     )
@@ -82,6 +84,7 @@ private fun HomeContent(
     onChipClick: (HomeTab) -> Unit,
     onCollectionClick: (String) -> Unit,
     onOpenProfile: () -> Unit,
+    onRetry: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -151,6 +154,20 @@ private fun HomeContent(
                     ) {
                         CircularProgressIndicator(color = colors.accent)
                     }
+                }
+                return@LazyColumn
+            }
+
+            // Checked after loading so a retry replaces the error with a spinner
+            // instead of showing both.
+            val error = state.error
+            if (error != null) {
+                item(key = "error") {
+                    ErrorState(
+                        message = error,
+                        onRetry = onRetry,
+                        modifier = Modifier.padding(top = dimens.spaceXxl),
+                    )
                 }
                 return@LazyColumn
             }
@@ -373,6 +390,7 @@ private fun HomePreview() {
             onChipClick = {},
             onCollectionClick = {},
             onOpenProfile = {},
+            onRetry = {},
             contentPadding = PaddingValues(),
         )
     }
@@ -393,6 +411,7 @@ private fun HomeFollowingPreview() {
             onChipClick = {},
             onCollectionClick = {},
             onOpenProfile = {},
+            onRetry = {},
             contentPadding = PaddingValues(),
         )
     }

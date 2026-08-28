@@ -17,42 +17,68 @@ sealed interface MediaCollection {
 
     /** Secondary line on a card. */
     val subtitle: String
+
+    /**
+     * Remote cover art, or null when the catalog has none.
+     *
+     * On the interface rather than only on the subtypes so a shelf can render a
+     * mixed list without downcasting. Every renderer needs it, and leaving it off
+     * meant call sites silently fell back to a gradient for real records.
+     */
+    val artworkUrl: String?
 }
 
 data class Artist(
     override val id: String,
     val name: String,
-    val monthlyListeners: Int = 0,
-    val artworkUrl: String? = null,
+    /**
+     * Primary genre, when the catalog reports one.
+     *
+     * Replaced a `monthlyListeners` count that the catalog API does not expose;
+     * keeping it would have meant printing an invented number on screen.
+     */
+    val genre: String? = null,
+    override val artworkUrl: String? = null,
 ) : MediaCollection {
     override val title: String get() = name
-    override val subtitle: String get() = "Artist"
+    override val subtitle: String get() = genre ?: "Artist"
 }
 
 data class Album(
     override val id: String,
     override val title: String,
     val artistName: String,
-    val year: Int,
-    val trackIds: List<String> = emptyList(),
-    val artworkUrl: String? = null,
+    /** Null when the catalog omits a release date. */
+    val year: Int? = null,
+    val genre: String? = null,
+    val trackCount: Int = 0,
+    override val artworkUrl: String? = null,
 ) : MediaCollection {
     override val subtitle: String get() = artistName
 }
 
+/**
+ * A user-created playlist.
+ *
+ * The catalog API has no concept of playlists, so nothing constructs these yet.
+ * The type stays because playlists are user data and will be created and stored
+ * once accounts exist; Home and Library are built from albums and artists in the
+ * meantime rather than inventing playlists to fill the layout.
+ */
 data class Playlist(
     override val id: String,
     override val title: String,
     val description: String,
     val ownerName: String,
     val trackIds: List<String> = emptyList(),
-    val saves: Int = 0,
-    val artworkUrl: String? = null,
+    override val artworkUrl: String? = null,
     /** Pinned entries sort to the top of Your Library and show a green pin. */
     val isPinned: Boolean = false,
 ) : MediaCollection {
     override val subtitle: String get() = description
 }
+
+/** A catalog track whose official provider page is opened outside the app. */
 
 data class Track(
     val id: String,
@@ -62,7 +88,15 @@ data class Track(
     val durationMs: Long,
     val isExplicit: Boolean = false,
     val artworkUrl: String? = null,
-)
+    /** Official provider page/search URL opened outside the app. */
+    val externalUrl: String? = null,
+    /** Album the track belongs to, so a row can navigate to its album. */
+    val albumId: String? = null,
+    /** Catalog id of the performer, so an artist page can be opened from a track. */
+    val artistId: String? = null,
+) {
+    val isExternallyOpenable: Boolean get() = !externalUrl.isNullOrBlank()
+}
 
 /** A titled, horizontally scrolling row on the Home screen. */
 data class Shelf(
@@ -78,24 +112,30 @@ data class BrowseCategory(
 )
 
 /**
- * An algorithmic radio card. Rendered as a coloured tile with a RADIO badge and
- * overlapping circular artist images, so it needs its own type rather than
- * reusing [MediaCollection].
+ * A genre radio tile. Rendered as a coloured panel with a RADIO badge and
+ * overlapping circular artwork, so it needs its own type rather than reusing
+ * [MediaCollection].
+ *
+ * Built from a genre plus the artists the catalog actually returned for it, so
+ * the caption names real artists rather than invented ones.
  */
 data class Station(
     val id: String,
     val name: String,
-    /** Comma separated seed artists, shown as a caption under the tile. */
+    /** Comma separated artists, shown as a caption under the tile. */
     val seedArtists: String,
+    val artworkUrl: String? = null,
 )
 
-/** A card in the Following feed's "Latest releases" list. */
+/** A card in the Following feed's release list. */
 data class ReleaseItem(
     val id: String,
     val artistName: String,
     val title: String,
-    val postedAgo: String,
+    /** Release year, or empty when the catalog omits it. */
+    val releasedLabel: String,
     val songCount: Int,
+    val artworkUrl: String? = null,
 )
 
 /** One avatar in the friend-activity strip inside the profile drawer. */
@@ -128,66 +168,37 @@ data class ExploreItem(
     val id: String,
     val title: String,
     val caption: String? = null,
+    val artworkUrl: String? = null,
+    /** Optional playable track behind an explore tile. */
+    val track: Track? = null,
 )
 
 /*
  * ---------------------------------------------------------------------------
  * Now Playing page content
  *
- * Now Playing is a scrolling page, not just a transport panel: below the
- * controls sit lyrics, artist context, contributor credits and related content.
- * Those are modelled here so the screen can be built before any real metadata
- * provider exists.
+ * Now Playing is a scrolling page, not just a transport panel.
+ *
+ * An earlier version of this modelled lyrics, an artist biography, contributor
+ * credits and podcast tie-ins. None of that exists in the catalog API, and the
+ * only way to render those sections was to fabricate the content. They are gone.
+ * What remains is what can actually be fetched: the rest of the album, and other
+ * work by the same artist.
  * ---------------------------------------------------------------------------
  */
-
-/** One line of lyrics. Instrumental breaks render as a note glyph, not text. */
-data class LyricLine(
-    val text: String,
-    val isInstrumental: Boolean = false,
-)
-
-data class Lyrics(
-    val lines: List<LyricLine>,
-    /** Index into [lines] that is currently being sung. */
-    val activeIndex: Int,
-)
-
-/** A podcast episode row in the "Discover more about" card. */
-data class EpisodeItem(
-    val id: String,
-    val title: String,
-    val subtitle: String,
-)
-
-/** A person credited on the track, shown in the SongDNA card. */
-data class Contributor(
-    val id: String,
-    val name: String,
-    val role: String,
-)
-
-/** A tile in the "Explore" row at the bottom of Now Playing. */
-data class ExploreCard(
-    val id: String,
-    val title: String,
-)
-
-data class Credit(
-    val name: String,
-    val role: String,
-)
-
-/** Everything the Now Playing page renders below the transport controls. */
 data class TrackDetails(
-    /** Small label above the artwork, e.g. why this track is playing. */
+    /** Small label above the artwork explaining where the track came from. */
     val contextLabel: String,
-    val lyrics: Lyrics,
-    val artistBio: String,
-    val episodes: List<EpisodeItem>,
-    val contributors: List<Contributor>,
-    val exploreCards: List<ExploreCard>,
-    val credits: List<Credit>,
+    /** Primary genre returned by optional Spotify artist enrichment. */
+    val artistGenre: String? = null,
+    /** Remaining tracks on the same album. */
+    val albumTracks: List<Track> = emptyList(),
+    /** Other tracks by the same artist. */
+    val moreByArtist: List<Track> = emptyList(),
+    /** Other albums by the same artist. */
+    val artistAlbums: List<Album> = emptyList(),
+    /** Spotify recommendations resolved back to iTunes metadata. */
+    val recommendations: List<Track> = emptyList(),
 )
 
 /** The filter chips across the top of Home. */
@@ -252,8 +263,8 @@ enum class RepeatMode { Off, All, One }
  * Everything the player UI needs to render.
  *
  * Phase 1 drives this from an in-memory fake so the Now Playing screen and mini
- * player can be built and reviewed. Phase 5 swaps the source for Media3 without
- * changing this shape.
+ * player can be built and reviewed. Runtime catalog data now comes from iTunes,
+ * with optional Spotify enrichment and official external playback handoff.
  */
 data class PlaybackState(
     val track: Track? = null,
@@ -264,17 +275,31 @@ data class PlaybackState(
     val isSaved: Boolean = false,
     /**
      * Remote playback target, or null when playing on this device. Drives the
-     * green device row in the mini player. Becomes a real Spotify-Connect style
-     * device in a later phase.
+     * green device row in the mini player.
      */
     val deviceName: String? = null,
+
+    /**
+     * Length of the actual full stream, as reported by the player.
+     *
+     * Distinct from `track.durationMs` when the provider's catalog duration is
+     * rounded or otherwise differs from the decoded media duration.
+     */
+    val streamDurationMs: Long? = null,
+
+    /** Set when playback failed or the track has no stream. Null when fine. */
+    val error: String? = null,
 ) {
     val hasTrack: Boolean get() = track != null
 
-    /** 0f..1f, safe when there is no track or a zero-length track. */
+    /** The duration the scrubber and timestamps should use. */
+    val effectiveDurationMs: Long
+        get() = streamDurationMs ?: track?.durationMs ?: 0L
+
+    /** 0f..1f, safe when there is no track or a zero-length clip. */
     val progress: Float
         get() {
-            val duration = track?.durationMs ?: return 0f
+            val duration = effectiveDurationMs
             if (duration <= 0L) return 0f
             return (positionMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
         }

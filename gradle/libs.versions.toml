@@ -38,6 +38,9 @@ splashscreen = "1.0.1"
 # Third party -----------------------------------------------------------------
 coil = "3.6.0"
 kotlinxSerialization = "1.9.0"
+# Pinned explicitly rather than inherited from Coil, so the HTTP client the app
+# calls the catalog API with is a deliberate choice and not a transitive accident.
+okhttp = "5.5.0"
 
 [libraries]
 # --- Build classpath (not app dependencies) ---
@@ -69,8 +72,16 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 
-# --- Serialization (needed by navigation type-safe routes) ---
+# --- Serialization (navigation type-safe routes + API responses) ---
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+# --- Networking ---
+# No Retrofit on purpose: the catalog API is two GET endpoints, so a raw OkHttp
+# call plus kotlinx.serialization is less code than the wiring Retrofit needs,
+# and avoids taking a major-version dependency for no gain.
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+
+# --- Audio playback ---
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

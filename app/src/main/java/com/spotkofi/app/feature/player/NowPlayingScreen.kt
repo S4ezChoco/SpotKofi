@@ -80,9 +80,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.spotkofi.app.R
 import com.spotkofi.app.core.LocalAppContainer
-import com.spotkofi.app.data.model.Contributor
-import com.spotkofi.app.data.model.EpisodeItem
-import com.spotkofi.app.data.model.Lyrics
+import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.RepeatMode
 import com.spotkofi.app.data.model.Track
@@ -91,7 +89,10 @@ import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.data.repository.previewTrack
 import com.spotkofi.app.data.repository.previewTrackDetails
 import com.spotkofi.app.ui.components.Artwork
+import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.artworkSeedColor
+import com.spotkofi.app.ui.motion.clickableScale
+import com.spotkofi.app.ui.theme.ErrorRed
 import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlinx.coroutines.launch
@@ -103,6 +104,8 @@ private const val DISMISS_VELOCITY = 1200f
 fun NowPlayingScreen(
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Opens an album from the related-content rows. */
+    onCollectionClick: (String) -> Unit = {},
     /** Raw vertical drag delta, in px, from the hero artwork. */
     onDrag: (Float) -> Unit = {},
     /** Fling velocity in px/s when the finger lifts. */
@@ -119,6 +122,8 @@ fun NowPlayingScreen(
         state = state,
         details = details,
         onCollapse = onCollapse,
+        onCollectionClick = onCollectionClick,
+        onPlayTrack = viewModel::onPlayTrack,
         onDrag = onDrag,
         onDragStopped = onDragStopped,
         onTogglePlayPause = viewModel::onTogglePlayPause,
@@ -137,6 +142,8 @@ private fun NowPlayingContent(
     state: PlaybackState,
     details: TrackDetails?,
     onCollapse: () -> Unit,
+    onCollectionClick: (String) -> Unit,
+    onPlayTrack: (Track) -> Unit,
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -199,13 +206,15 @@ private fun NowPlayingContent(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = dimens.spaceHuge),
         ) {
-            // ---- Hero: artwork, overlaid lyric line, expanded top bar ----
+            // ---- Hero: video/artwork, overlay label, expanded top bar ----
             item(key = "hero") {
                 Column {
                     HeroArtwork(
                         track = track,
-                        contextLabel = details?.contextLabel.orEmpty(),
-                        activeLyric = details?.lyrics?.activeLine(),
+                        contextLabel = listOfNotNull(
+                            details?.contextLabel?.takeIf { it.isNotBlank() },
+                            details?.artistGenre?.takeIf { it.isNotBlank() },
+                        ).joinToString(" · "),
                         onCollapse = onCollapse,
                         onDrag = onDrag,
                         onDragStopped = onDragStopped,
@@ -223,7 +232,25 @@ private fun NowPlayingContent(
                         onToggleSaved = onToggleSaved,
                     )
                     Spacer(Modifier.height(dimens.spaceSm))
-                    Scrubber(state = state, track = track, onSeek = onSeek)
+                    Scrubber(state = state, onSeek = onSeek)
+                    if (track.isExternallyOpenable) {
+                        Spacer(Modifier.height(dimens.spaceXs))
+                        Text(
+                            text = "Opens the official YouTube app or browser",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textSecondary,
+                        )
+                    }
+                    state.error?.let { error ->
+                        Spacer(Modifier.height(dimens.spaceXs))
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ErrorRed,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Spacer(Modifier.height(dimens.spaceSm))
                     TransportRow(
                         state = state,
@@ -239,47 +266,59 @@ private fun NowPlayingContent(
                 }
             }
 
+            // Only sections the catalog can actually fill.
+            //
+            // Lyrics, an artist biography, contributor credits and podcast tie-ins
+            // used to live here. The catalog API provides none of those, and the
+            // only way to keep the cards was to invent their contents, so they are
+            // gone rather than filled with fiction.
             if (details != null) {
-                item(key = "lyrics") {
-                    SectionSpacing { LyricsCard(lyrics = details.lyrics, seed = seed) }
-                }
-                item(key = "discover") {
-                    SectionSpacing {
-                        DiscoverCard(
-                            artistName = track.artistName,
-                            episodes = details.episodes,
-                        )
+                if (details.albumTracks.isNotEmpty()) {
+                    item(key = "album_tracks") {
+                        SectionSpacing {
+                            TrackListCard(
+                                title = "More from ${track.albumTitle}",
+                                tracks = details.albumTracks,
+                                onTrackClick = onPlayTrack,
+                            )
+                        }
                     }
                 }
-                item(key = "suggested") {
-                    SectionSpacing { SuggestedVideoCard(trackId = track.id) }
-                }
-                item(key = "about") {
-                    SectionSpacing {
-                        AboutArtistCard(
-                            artistName = track.artistName,
-                            bio = details.artistBio,
-                        )
+
+                if (details.moreByArtist.isNotEmpty()) {
+                    item(key = "more_by_artist") {
+                        SectionSpacing {
+                            TrackListCard(
+                                title = "More by ${track.artistName}",
+                                tracks = details.moreByArtist.take(8),
+                                onTrackClick = onPlayTrack,
+                            )
+                        }
                     }
                 }
-                item(key = "songdna") {
-                    SectionSpacing {
-                        SongDnaCard(
-                            trackTitle = track.title,
-                            contributors = details.contributors,
-                        )
+
+                if (details.recommendations.isNotEmpty()) {
+                    item(key = "spotify_recommendations") {
+                        SectionSpacing {
+                            TrackListCard(
+                                title = "Recommended by Spotify",
+                                tracks = details.recommendations.take(8),
+                                onTrackClick = onPlayTrack,
+                            )
+                        }
                     }
                 }
-                item(key = "explore") {
-                    SectionSpacing(horizontal = false) {
-                        ExploreRow(
-                            artistName = track.artistName,
-                            cards = details.exploreCards.map { it.title },
-                        )
+
+                if (details.artistAlbums.isNotEmpty()) {
+                    item(key = "artist_albums") {
+                        SectionSpacing(horizontal = false) {
+                            AlbumRow(
+                                title = "Albums by ${track.artistName}",
+                                albums = details.artistAlbums,
+                                onAlbumClick = onCollectionClick,
+                            )
+                        }
                     }
-                }
-                item(key = "credits") {
-                    SectionSpacing { CreditsCard(details = details) }
                 }
             }
         }
@@ -307,7 +346,6 @@ private fun NowPlayingContent(
 private fun HeroArtwork(
     track: Track,
     contextLabel: String,
-    activeLyric: String?,
     onCollapse: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
@@ -320,6 +358,7 @@ private fun HeroArtwork(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            // Artwork is shown while the official YouTube app or browser owns playback.
             .aspectRatio(0.82f)
             .draggable(
                 state = dragState,
@@ -381,9 +420,11 @@ private fun HeroArtwork(
             }
         }
 
-        if (!activeLyric.isNullOrBlank()) {
+        // Artwork remains visible while the official YouTube app or browser owns
+        // playback. No lyrics or protected media are scraped by this app.
+        if (track.albumTitle.isNotBlank()) {
             Text(
-                text = activeLyric,
+                text = track.albumTitle,
                 style = MaterialTheme.typography.headlineSmall,
                 color = colors.textPrimary,
                 maxLines = 2,
@@ -408,7 +449,7 @@ private fun TrackInfoRow(
     val dimens = SpotKofiTheme.dimens
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Artwork(id = track.id, size = 44.dp)
+        Artwork(id = track.id, size = 44.dp, url = track.artworkUrl)
         Spacer(Modifier.width(dimens.spaceMd))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -467,7 +508,6 @@ private fun SavedCheck(isSaved: Boolean, onClick: () -> Unit) {
 @Composable
 private fun Scrubber(
     state: PlaybackState,
-    track: Track,
     onSeek: (Float) -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
@@ -496,15 +536,16 @@ private fun Scrubber(
             ),
             modifier = Modifier.fillMaxWidth(),
         )
+        val durationMs = state.effectiveDurationMs
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = (track.durationMs * fraction).toLong().asTrackDuration(),
+                text = (durationMs * fraction).toLong().asTrackDuration(),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = track.durationMs.asTrackDuration(),
+                text = durationMs.asTrackDuration(),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
@@ -662,93 +703,19 @@ private fun SectionSpacing(
     }
 }
 
+/**
+ * A card listing tracks, used for the rest of the album and for other work by the
+ * same artist.
+ *
+ * Unplayable rows are dimmed rather than hidden: a catalog can lack a stream
+ * for a track, and silently dropping it would make an album look incomplete.
+ */
 @Composable
-private fun LyricsCard(lyrics: Lyrics, seed: Color) {
-    val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
-
-    // Saturated panel derived from the artwork, the way the real card samples the
-    // cover rather than using a fixed brand colour.
-    val panel = remember(seed) { lerp(seed, Color(0xFF1B3FA0), 0.45f) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(SpotKofiTheme.shapes.card)
-            .background(panel)
-            .padding(dimens.spaceLg),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Lyrics",
-                style = MaterialTheme.typography.titleLarge,
-                color = Color.White,
-                modifier = Modifier.weight(1f),
-            )
-            CircleIconButton(Icons.Filled.Share, "Share lyrics")
-            Spacer(Modifier.width(dimens.spaceSm))
-            CircleIconButton(Icons.Filled.OpenInFull, "Expand lyrics")
-        }
-
-        Spacer(Modifier.height(dimens.spaceLg))
-
-        lyrics.lines.forEachIndexed { index, line ->
-            val isActive = index == lyrics.activeIndex
-            if (line.isInstrumental) {
-                Text(
-                    text = "\u266A",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Color.White.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(vertical = dimens.spaceSm),
-                )
-            } else {
-                Text(
-                    text = line.text,
-                    style = MaterialTheme.typography.headlineMedium,
-                    // Sung line is opaque white; the rest recede.
-                    color = if (isActive) {
-                        Color.White
-                    } else {
-                        Color.White.copy(alpha = 0.55f)
-                    },
-                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
-                    modifier = Modifier.padding(vertical = dimens.spaceXs),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(dimens.spaceSm))
-        Text(
-            text = "Placeholder lyrics",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.6f),
-        )
-    }
-}
-
-@Composable
-private fun CircleIconButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
+private fun TrackListCard(
+    title: String,
+    tracks: List<Track>,
+    onTrackClick: (Track) -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .size(32.dp)
-            .background(Color.Black.copy(alpha = 0.28f), CircleShape)
-            .clickable { },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = description,
-            tint = Color.White,
-            modifier = Modifier.size(17.dp),
-        )
-    }
-}
-
-@Composable
-private fun DiscoverCard(artistName: String, episodes: List<EpisodeItem>) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
@@ -757,240 +724,82 @@ private fun DiscoverCard(artistName: String, episodes: List<EpisodeItem>) {
             .fillMaxWidth()
             .clip(SpotKofiTheme.shapes.card)
             .background(colors.card)
-            .padding(dimens.spaceLg),
+            .padding(vertical = dimens.spaceMd),
     ) {
         Text(
-            text = "Discover more about $artistName",
+            text = title,
             style = MaterialTheme.typography.titleLarge,
             color = colors.textPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = dimens.spaceLg),
         )
-        Spacer(Modifier.height(dimens.spaceMd))
-        episodes.forEach { episode ->
+
+        Spacer(Modifier.height(dimens.spaceSm))
+
+        tracks.forEach { item ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = dimens.spaceSm),
+                    .clickableScale(pressedScale = 0.98f, enabled = item.isExternallyOpenable) {
+                        onTrackClick(item)
+                    }
+                    .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceSm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Artwork(id = episode.id, size = 52.dp)
+                Artwork(id = item.id, size = 44.dp, url = item.artworkUrl)
                 Spacer(Modifier.width(dimens.spaceMd))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = episode.title,
+                        text = item.title,
                         style = MaterialTheme.typography.titleSmall,
-                        color = colors.textPrimary,
-                        maxLines = 2,
+                        color = if (item.isExternallyOpenable) {
+                            colors.textPrimary
+                        } else {
+                            colors.textTertiary
+                        },
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = episode.subtitle,
+                        text = if (item.isExternallyOpenable) {
+                            item.artistName
+                        } else {
+                            "Official link unavailable"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Spacer(Modifier.width(dimens.spaceSm))
-                Icon(
-                    imageVector = Icons.Filled.AddCircleOutline,
-                    contentDescription = stringResource(R.string.cd_add_to_library),
-                    tint = colors.textSecondary,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clickable { },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SuggestedVideoCard(trackId: String) {
-    val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(SpotKofiTheme.shapes.card)
-            .background(colors.card)
-            .padding(dimens.spaceLg),
-    ) {
-        Text(
-            text = "Suggested Video",
-            style = MaterialTheme.typography.titleLarge,
-            color = colors.textPrimary,
-        )
-        Spacer(Modifier.height(dimens.spaceMd))
-        Box {
-            Artwork(
-                id = trackId + "_vid",
-                shape = SpotKofiTheme.shapes.tile,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1.7f),
-            )
-            Text(
-                text = "05:35",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(dimens.spaceSm)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .padding(horizontal = 5.dp, vertical = 2.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun AboutArtistCard(artistName: String, bio: String) {
-    val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
-    var expanded by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(SpotKofiTheme.shapes.card)
-            .background(colors.card)
-            .clickable { expanded = !expanded }
-            .padding(dimens.spaceLg),
-    ) {
-        Text(
-            text = "About $artistName",
-            style = MaterialTheme.typography.titleLarge,
-            color = colors.textPrimary,
-        )
-        Spacer(Modifier.height(dimens.spaceSm))
-        Text(
-            text = bio,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary,
-            maxLines = if (expanded) Int.MAX_VALUE else 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(dimens.spaceXs))
-        Text(
-            text = if (expanded) "see less" else "see more",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textPrimary,
-        )
-    }
-}
-
-@Composable
-private fun SongDnaCard(trackTitle: String, contributors: List<Contributor>) {
-    val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(SpotKofiTheme.shapes.card)
-            .background(colors.card)
-            .padding(dimens.spaceLg),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "SongDNA",
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.textPrimary,
-            )
-            Spacer(Modifier.width(dimens.spaceSm))
-            Text(
-                text = "Beta",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                ),
-                color = colors.onAccent,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(colors.accent)
-                    .padding(horizontal = 5.dp, vertical = 2.dp),
-            )
-        }
-
-        Spacer(Modifier.height(dimens.spaceLg))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(dimens.spaceLg),
-        ) {
-            contributors.forEach { contributor ->
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Artwork(id = contributor.id, size = 104.dp, shape = CircleShape)
-                    Spacer(Modifier.height(dimens.spaceSm))
-                    Text(
-                        text = contributor.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = colors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = contributor.role,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(dimens.spaceLg))
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = trackTitle,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = colors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "${contributors.size + 1} contributors",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textSecondary,
+                    text = item.durationMs.asTrackDuration(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textTertiary,
                 )
             }
-            Text(
-                text = "Explore",
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.textPrimary,
-                modifier = Modifier
-                    .clip(SpotKofiTheme.shapes.chip)
-                    .clickable { }
-                    .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceSm),
-            )
         }
-
-        Spacer(Modifier.height(dimens.spaceSm))
-        Text(
-            text = "Discover the people behind the song.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary,
-        )
     }
 }
 
+/** Horizontally scrolling albums by the current artist. */
 @Composable
-private fun ExploreRow(artistName: String, cards: List<String>) {
+private fun AlbumRow(
+    title: String,
+    albums: List<Album>,
+    onAlbumClick: (String) -> Unit,
+) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
     Column {
         Text(
-            text = "Explore $artistName",
+            text = title,
             style = MaterialTheme.typography.headlineSmall,
             color = colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = dimens.screenGutter),
         )
         Spacer(Modifier.height(dimens.spaceMd))
@@ -998,79 +807,8 @@ private fun ExploreRow(artistName: String, cards: List<String>) {
             contentPadding = PaddingValues(horizontal = dimens.screenGutter),
             horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
         ) {
-            items(items = cards, key = { it }) { title ->
-                Box(
-                    modifier = Modifier
-                        .width(140.dp)
-                        .aspectRatio(0.85f)
-                        .clip(SpotKofiTheme.shapes.tile)
-                        .clickable { },
-                ) {
-                    Artwork(id = title, modifier = Modifier.fillMaxSize())
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f)),
-                                ),
-                            ),
-                    )
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(dimens.spaceMd),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CreditsCard(details: TrackDetails) {
-    val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(SpotKofiTheme.shapes.card)
-            .background(colors.card)
-            .padding(dimens.spaceLg),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Credits",
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.textPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "Show all",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.accent,
-                modifier = Modifier.clickable { },
-            )
-        }
-        Spacer(Modifier.height(dimens.spaceMd))
-        details.credits.forEach { credit ->
-            Column(modifier = Modifier.padding(vertical = dimens.spaceSm)) {
-                Text(
-                    text = credit.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = colors.textPrimary,
-                )
-                Text(
-                    text = credit.role,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textSecondary,
-                )
+            items(items = albums, key = { it.id }) { album ->
+                MediaCard(item = album, onClick = { onAlbumClick(album.id) })
             }
         }
     }
@@ -1133,9 +871,6 @@ private fun CollapsedBar(
     }
 }
 
-/** The line currently being sung, or null when there is nothing to show. */
-private fun Lyrics.activeLine(): String? =
-    lines.getOrNull(activeIndex)?.takeIf { !it.isInstrumental }?.text
 
 @Preview(name = "Now Playing", backgroundColor = 0xFF121212, showBackground = true, heightDp = 1400)
 @Composable
@@ -1152,6 +887,8 @@ private fun NowPlayingPreview() {
             ),
             details = previewTrackDetails(),
             onCollapse = {},
+            onCollectionClick = {},
+            onPlayTrack = {},
             onDrag = {},
             onDragStopped = {},
             onTogglePlayPause = {},

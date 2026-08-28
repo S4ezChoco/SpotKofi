@@ -95,6 +95,9 @@ fun StationCard(
                     .padding(top = dimens.spaceMd),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // The tucked-behind portrait stays a gradient on purpose: the
+                // catalog gives one image per station, and repeating it twice
+                // would read as a rendering glitch rather than two artists.
                 Artwork(
                     id = station.id + "_b",
                     size = 46.dp,
@@ -103,6 +106,7 @@ fun StationCard(
                 Artwork(
                     id = station.id,
                     size = 62.dp,
+                    url = station.artworkUrl,
                     shape = CircleShape,
                     modifier = Modifier.offset(x = (-14).dp),
                 )

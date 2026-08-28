@@ -13,53 +13,68 @@ import com.spotkofi.app.data.model.TrackDetails
 import kotlinx.coroutines.flow.Flow
 
 /**
- * The single seam between the UI and wherever music data comes from.
+ * The music catalog, as the UI sees it.
  *
- * This is the whole point of building the UI first: every screen depends on this
- * interface and never on a concrete implementation. Phase 1 binds it to
- * [FakeMusicRepository]. When a real catalog API is wired up, only the binding
- * in `AppContainer` changes; no screen, component, or ViewModel is touched.
+ * The feed and lookup calls are `suspend` rather than `Flow`-returning because
+ * they are one-shot network requests that can fail. A Flow that emits exactly once
+ * and then has to smuggle an error through hides that; a suspend function that
+ * throws lets each ViewModel decide what a failure means for its screen.
+ *
+ * [library] is the exception and stays a Flow, because it is genuinely observable
+ * local state that grows while the app is open.
  */
 interface MusicRepository {
 
-    /** Display name of the signed-in user. Replaced by the Supabase profile in Phase 3. */
+    /** Display name of the signed-in user. Becomes a real profile with accounts. */
     fun currentUserName(): String
 
-    /** The 2-column grid pinned to the top of Home. */
-    fun quickPicks(): Flow<List<MediaCollection>>
+    // ---------------------------------------------------------------- feeds
+
+    /** The compact grid pinned to the top of Home. */
+    suspend fun quickPicks(): List<MediaCollection>
+
+    /** Home content for [tab]. */
+    suspend fun homeSections(tab: HomeTab): List<HomeSection>
 
     /**
-     * Home content for [tab].
+     * What the user has opened, most recent first.
      *
-     * Content differs per tab, not just filtered: the Following tab is a release
-     * feed rather than a set of card shelves.
+     * Recorded locally via [recordVisited]. This is real usage data rather than a
+     * saved-items list, because saving requires an account.
      */
-    fun homeSections(tab: HomeTab): Flow<List<HomeSection>>
-
-    /** Everything the user has saved, for Your Library. */
     fun library(): Flow<List<MediaCollection>>
 
-    /** The four large colour tiles at the top of Search. */
+    /** Records that a collection was opened, for [library]. */
+    fun recordVisited(collection: MediaCollection)
+
+    // --------------------------------------------------------------- search
+
+    /** The genre tiles shown before anything is typed. */
     fun browseCategories(): List<BrowseCategory>
-
-    fun exploreVideos(): List<ExploreItem>
-
-    fun exploreEpisodes(): List<ExploreItem>
-
-    /** Friend avatar strip in the profile drawer. */
-    fun friendActivity(): List<FriendActivity>
-
-    /** DM threads in the profile drawer. Backed by Supabase Realtime in Phase 4. */
-    fun conversations(): List<Conversation>
 
     suspend fun search(query: String): SearchResults
 
-    /** Resolves a collection by id, or null when it does not exist. */
+    suspend fun exploreVideos(): List<ExploreItem>
+
+    suspend fun explorePodcasts(): List<ExploreItem>
+
+    // --------------------------------------------------------------- detail
+
+    /** Resolves a collection by id, or null when the catalog has no such entry. */
     suspend fun collection(id: String): MediaCollection?
 
-    /** Track listing for an album or playlist, in running order. */
+    /** Track listing for an album, or an artist's top tracks. */
     suspend fun tracks(collectionId: String): List<Track>
 
-    /** Lyrics, bio, contributors and related content for the Now Playing page. */
+    /** Related content for the Now Playing page. */
     suspend fun trackDetails(track: Track): TrackDetails
+
+    // --------------------------------------------------------------- social
+    // Not backed by the catalog API: these are account features and stay empty
+    // until sign-in exists. Returning empty lists is honest; the screens render
+    // their own empty states.
+
+    fun friendActivity(): List<FriendActivity>
+
+    fun conversations(): List<Conversation>
 }

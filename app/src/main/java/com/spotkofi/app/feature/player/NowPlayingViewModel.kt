@@ -2,6 +2,7 @@ package com.spotkofi.app.feature.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.TrackDetails
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
@@ -48,4 +49,22 @@ class NowPlayingViewModel(
     fun onToggleShuffle() = player.toggleShuffle()
     fun onCycleRepeat() = player.cycleRepeatMode()
     fun onToggleSaved() = player.toggleSaved()
+
+    /**
+     * Plays a track picked from one of the related-content rows.
+     *
+     * The surrounding list becomes the queue, so next/previous walks the album or
+     * the artist's other work rather than dead-ending on a single track.
+     */
+    fun onPlayTrack(track: Track) {
+        val current = _details.value
+        val queue = when {
+            current == null -> listOf(track)
+            current.albumTracks.any { it.id == track.id } -> current.albumTracks
+            current.moreByArtist.any { it.id == track.id } -> current.moreByArtist
+            current.recommendations.any { it.id == track.id } -> current.recommendations
+            else -> listOf(track)
+        }
+        player.play(track, queue)
+    }
 }

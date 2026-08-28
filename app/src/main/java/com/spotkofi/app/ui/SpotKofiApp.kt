@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -148,8 +149,19 @@ fun SpotKofiApp(
             }
 
             fun openPlayer() {
+                // Make the video surface visible immediately. The old path only
+                // started an animation from the dismissed position; in practice
+                // the WebView could keep playing behind the mini-player while the
+                // full surface remained offscreen.
                 playerMounted = true
-                settlePlayer(open = true)
+                playerPos.floatValue = 0f
+            }
+
+            // Track selection used to leave the full player at its dismissed
+            // position, so only the mini-player was visible. Open Now Playing
+            // as soon as a track is selected; collapsing it remains explicit.
+            LaunchedEffect(playbackState.track?.id) {
+                if (playbackState.hasTrack) openPlayer()
             }
 
             val backStackEntry by navController.currentBackStackEntryAsState()
@@ -400,7 +412,9 @@ fun SpotKofiApp(
                     // translation, which is exactly how the two got out of step
                     // before. Mount/unmount is a plain boolean and all motion comes
                     // from the one position value.
-                    if (playerMounted) {
+                    // Keep Now Playing composed while a track exists so the
+                    // external-link handoff state survives collapsing to the mini-player.
+                    if (playerMounted || playbackState.hasTrack) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -423,6 +437,12 @@ fun SpotKofiApp(
                         ) {
                             NowPlayingScreen(
                                 onCollapse = { settlePlayer(open = false) },
+                                onCollectionClick = { id ->
+                                    // Collapse first, otherwise the album opens
+                                    // behind the player and the tap looks ignored.
+                                    settlePlayer(open = false)
+                                    navController.navigate(CollectionRoute(id))
+                                },
                                 onDrag = { delta ->
                                     // Written synchronously: no coroutine per touch
                                     // event, so the page tracks the finger exactly.

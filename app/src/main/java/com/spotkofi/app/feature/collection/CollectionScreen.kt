@@ -63,9 +63,10 @@ import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Playlist
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
-import com.spotkofi.app.data.repository.previewPlaylist
+import com.spotkofi.app.data.repository.previewCollection
 import com.spotkofi.app.data.repository.previewTracks
 import com.spotkofi.app.ui.components.Artwork
+import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.PlayButton
 import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.components.artworkSeedColor
@@ -95,6 +96,7 @@ fun CollectionScreen(
         onBack = onBack,
         onPlayAll = viewModel::onPlayAll,
         onTrackClick = viewModel::onTrackClick,
+        onRetry = viewModel::retry,
         contentPadding = contentPadding,
         modifier = modifier,
     )
@@ -107,16 +109,42 @@ private fun CollectionContent(
     onBack: () -> Unit,
     onPlayAll: () -> Unit,
     onTrackClick: (Track) -> Unit,
+    onRetry: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
-    val collection = state.collection
-    if (state.isLoading || collection == null) {
+    if (state.isLoading) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = colors.accent)
+        }
+        return
+    }
+
+    val collection = state.collection
+    if (collection == null) {
+        // Back is still reachable while this is showing: the header is gone, so
+        // without it the only way out would be the system gesture.
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.cd_back),
+                    tint = colors.textPrimary,
+                )
+            }
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                ErrorState(
+                    message = state.error ?: "Could not load this",
+                    onRetry = onRetry,
+                )
+            }
         }
         return
     }
@@ -161,6 +189,7 @@ private fun CollectionContent(
                         Artwork(
                             id = collection.id,
                             size = 250.dp,
+                            url = collection.artworkUrl,
                             shape = if (collection is Artist) {
                                 SpotKofiTheme.shapes.avatar
                             } else {
@@ -190,6 +219,7 @@ private fun CollectionContent(
 
                     ActionRow(
                         collectionId = collection.id,
+                        artworkUrl = collection.artworkUrl,
                         isPlaying = playback.isPlaying &&
                             playback.track?.id in state.tracks.map { it.id },
                         onPlayAll = onPlayAll,
@@ -311,6 +341,7 @@ private fun MetaRow(collection: MediaCollection, tracks: List<Track>) {
 @Composable
 private fun ActionRow(
     collectionId: String,
+    artworkUrl: String?,
     isPlaying: Boolean,
     onPlayAll: () -> Unit,
 ) {
@@ -323,7 +354,7 @@ private fun ActionRow(
             .padding(horizontal = dimens.screenGutter),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Artwork(id = collectionId + "_thumb", size = 30.dp)
+        Artwork(id = collectionId + "_thumb", size = 30.dp, url = artworkUrl)
 
         Spacer(Modifier.width(dimens.spaceMd))
 
@@ -439,10 +470,23 @@ private fun MediaCollection.metaLine(tracks: List<Track>): String {
         "${minutes}min"
     }
 
+    // Every part is omitted when the catalog does not report it, rather than
+    // printing a zero or an invented figure.
     return when (this) {
-        is Playlist -> "$saves saves \u2022 $duration"
-        is Album -> "$year \u2022 ${tracks.size} songs \u2022 $duration"
-        is Artist -> "%,d monthly listeners".format(monthlyListeners)
+        is Playlist -> listOf("${tracks.size} songs", duration).joinToString(" \u2022 ")
+
+        is Album -> listOfNotNull(
+            year?.toString(),
+            genre,
+            "${tracks.size} songs".takeIf { tracks.isNotEmpty() },
+            duration.takeIf { tracks.isNotEmpty() },
+        ).joinToString(" \u2022 ")
+
+        // The catalog exposes no listener counts, so the genre is all there is.
+        is Artist -> listOfNotNull(
+            genre,
+            "${tracks.size} songs".takeIf { tracks.isNotEmpty() },
+        ).joinToString(" \u2022 ").ifBlank { "Artist" }
     }
 }
 
@@ -452,7 +496,7 @@ private fun CollectionPreview() {
     SpotKofiTheme {
         CollectionContent(
             state = CollectionViewModel.UiState(
-                collection = previewPlaylist(),
+                collection = previewCollection(),
                 tracks = previewTracks(),
                 isLoading = false,
             ),
@@ -460,6 +504,7 @@ private fun CollectionPreview() {
             onBack = {},
             onPlayAll = {},
             onTrackClick = {},
+            onRetry = {},
             contentPadding = PaddingValues(),
         )
     }

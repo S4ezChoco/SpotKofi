@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -297,16 +298,28 @@ private fun LibraryCollection(
     val dimens = SpotKofiTheme.dimens
 
     if (items.isEmpty()) {
-        Box(
+        // This list is what the user has opened, not what they have saved, because
+        // saving needs an account. The second line says so: an unexplained empty
+        // screen on a tab called Your Library reads as a bug.
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(dimens.spaceHuge),
-            contentAlignment = Alignment.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
             Text(
                 text = "Nothing here yet",
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.titleLarge,
+                color = colors.textPrimary,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(dimens.spaceSm))
+            Text(
+                text = "Albums and artists you open will show up here.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary,
+                textAlign = TextAlign.Center,
             )
         }
         return
@@ -373,6 +386,7 @@ private fun LibraryRow(
         Artwork(
             id = item.id,
             size = dimens.artworkRow,
+            url = item.artworkUrl,
             shape = if (item is Artist) {
                 SpotKofiTheme.shapes.avatar
             } else {

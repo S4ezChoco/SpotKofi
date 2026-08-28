@@ -43,6 +43,14 @@ android {
             "SUPABASE_PUBLISHABLE_KEY",
             "\"${localProp("SUPABASE_PUBLISHABLE_KEY")}\"",
         )
+        // Optional short-lived Spotify Web API access token for local development.
+        // Never put a Spotify client secret here: anything compiled into an APK is
+        // recoverable. Production should use PKCE or a server-side token broker.
+        buildConfigField(
+            "String",
+            "SPOTIFY_ACCESS_TOKEN",
+            "\"${localProp("SPOTIFY_ACCESS_TOKEN")}\"",
+        )
     }
 
     buildTypes {
@@ -109,6 +117,8 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+
+    implementation(libs.okhttp)
 
     // `ui-tooling` powers the @Preview renderer, debug-only so it is stripped
     // from release builds.

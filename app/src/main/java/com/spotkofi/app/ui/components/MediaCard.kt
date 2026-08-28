@@ -60,7 +60,7 @@ fun MediaCard(
     ) {
         Artwork(
             id = item.id,
-            url = item.artworkUrl(),
+            url = item.artworkUrl,
             shape = if (isArtist) shapes.avatar else shapes.artwork,
             modifier = Modifier
                 .fillMaxWidth()
@@ -121,7 +121,7 @@ fun QuickPickCard(
         Artwork(
             id = item.id,
             size = dimens.artworkSmall,
-            url = item.artworkUrl(),
+            url = item.artworkUrl,
             // Square-cornered here: the card's own rounding already frames it,
             // and doubling the radius looks soft at this size.
             shape = if (item is Artist) shapes.avatar else RectangleShape,
@@ -163,7 +163,7 @@ fun SpotlightCard(
     ) {
         Artwork(
             id = item.id,
-            url = item.artworkUrl(),
+            url = item.artworkUrl,
             shape = SpotKofiTheme.shapes.artwork,
             modifier = Modifier
                 .fillMaxWidth()
@@ -187,13 +187,6 @@ fun SpotlightCard(
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-/** Pulls the artwork url out of the sealed hierarchy without exposing it on the interface. */
-private fun MediaCollection.artworkUrl(): String? = when (this) {
-    is Album -> artworkUrl
-    is Artist -> artworkUrl
-    is Playlist -> artworkUrl
 }
 
 @Preview(name = "MediaCard", backgroundColor = 0xFF121212, showBackground = true)

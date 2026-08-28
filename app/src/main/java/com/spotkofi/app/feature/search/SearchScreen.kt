@@ -59,10 +59,10 @@ import com.spotkofi.app.data.model.BrowseCategory
 import com.spotkofi.app.data.model.ExploreItem
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
-import com.spotkofi.app.data.repository.previewExploreEpisodes
-import com.spotkofi.app.data.repository.previewExploreVideos
+import com.spotkofi.app.data.repository.previewExploreItems
 import com.spotkofi.app.data.repository.previewTopCategories
 import com.spotkofi.app.ui.components.Artwork
+import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.SectionHeader
@@ -95,6 +95,7 @@ fun SearchScreen(
         onCollectionClick = onCollectionClick,
         onTrackClick = viewModel::onTrackClick,
         onOpenProfile = onOpenProfile,
+        onRetry = viewModel::onRetry,
         contentPadding = contentPadding,
         modifier = modifier,
     )
@@ -108,6 +109,7 @@ private fun SearchContent(
     onCollectionClick: (String) -> Unit,
     onTrackClick: (Track) -> Unit,
     onOpenProfile: () -> Unit,
+    onRetry: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
@@ -181,6 +183,7 @@ private fun SearchContent(
                     state = state,
                     layout = layout,
                     contentPadding = contentPadding,
+                    onTrackClick = onTrackClick,
                 )
             } else {
                 ResultsList(
@@ -189,6 +192,7 @@ private fun SearchContent(
                     contentPadding = contentPadding,
                     onCollectionClick = onCollectionClick,
                     onTrackClick = onTrackClick,
+                    onRetry = onRetry,
                 )
             }
         }
@@ -202,6 +206,7 @@ private fun BrowseList(
     state: SearchViewModel.UiState,
     layout: ResponsiveLayout,
     contentPadding: PaddingValues,
+    onTrackClick: (Track) -> Unit,
 ) {
     val dimens = SpotKofiTheme.dimens
 
@@ -239,7 +244,12 @@ private fun BrowseList(
             ) {
                 Spacer(Modifier.height(dimens.shelfSpacing))
                 SectionHeader(title = "Explore music videos")
-                ExploreShelf(items = state.videos, tall = true, gutter = layout.gutter)
+                ExploreShelf(
+                    items = state.videos,
+                    tall = true,
+                    gutter = layout.gutter,
+                    onTrackClick = onTrackClick,
+                )
             }
         }
 
@@ -251,7 +261,12 @@ private fun BrowseList(
             ) {
                 Spacer(Modifier.height(dimens.shelfSpacing))
                 SectionHeader(title = "Explore episodes for you")
-                ExploreShelf(items = state.episodes, tall = false, gutter = layout.gutter)
+                ExploreShelf(
+                    items = state.episodes,
+                    tall = false,
+                    gutter = layout.gutter,
+                    onTrackClick = onTrackClick,
+                )
                 Spacer(Modifier.height(dimens.shelfSpacing))
             }
         }
@@ -267,14 +282,31 @@ private fun ResultsList(
     contentPadding: PaddingValues,
     onCollectionClick: (String) -> Unit,
     onTrackClick: (Track) -> Unit,
+    onRetry: () -> Unit,
 ) {
     val dimens = SpotKofiTheme.dimens
     val results = state.results
+    val error = state.error
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
     ) {
+        // A failed request and a query with genuinely no matches look identical
+        // from the result list alone, so the error is checked first. Telling
+        // someone their search found nothing when the network is down sends them
+        // looking for a different spelling.
+        if (error != null) {
+            item(key = "error") {
+                ErrorState(
+                    message = error,
+                    onRetry = onRetry,
+                    title = "Search didn't go through",
+                )
+            }
+            return@LazyColumn
+        }
+
         if (results.isEmpty && !state.isSearching) {
             item(key = "empty") { EmptyResults(query = state.query) }
         }
@@ -459,6 +491,7 @@ private fun ExploreShelf(
     items: List<ExploreItem>,
     tall: Boolean,
     gutter: androidx.compose.ui.unit.Dp,
+    onTrackClick: (Track) -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -471,11 +504,12 @@ private fun ExploreShelf(
             Column(
                 modifier = Modifier
                     .width(148.dp)
-                    .clickableScale { },
+                    .clickableScale { item.track?.let(onTrackClick) },
             ) {
                 Box {
                     Artwork(
                         id = item.id,
+                        url = item.artworkUrl,
                         shape = SpotKofiTheme.shapes.tile,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -534,14 +568,15 @@ private fun SearchPreview() {
             state = SearchViewModel.UiState(
                 userName = "kofi_listener",
                 categories = previewTopCategories(),
-                videos = previewExploreVideos(),
-                episodes = previewExploreEpisodes(),
+                videos = previewExploreItems(),
+                episodes = previewExploreItems(),
             ),
             onQueryChange = {},
             onClearQuery = {},
             onCollectionClick = {},
             onTrackClick = {},
             onOpenProfile = {},
+            onRetry = {},
             contentPadding = PaddingValues(),
         )
     }

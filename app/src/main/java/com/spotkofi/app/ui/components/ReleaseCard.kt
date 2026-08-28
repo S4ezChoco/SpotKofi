@@ -71,6 +71,7 @@ fun ReleaseCard(
             Artwork(
                 id = release.id,
                 size = 68.dp,
+                url = release.artworkUrl,
                 shape = SpotKofiTheme.shapes.artwork,
             )
 
@@ -85,7 +86,11 @@ fun ReleaseCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "${release.title} \u2022 ${release.postedAgo}",
+                    // The release year is often missing from the catalog, so the
+                    // separator is only drawn when there is something to separate.
+                    text = listOf(release.title, release.releasedLabel)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" \u2022 "),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textSecondary,
                     maxLines = 2,
@@ -195,11 +200,11 @@ private fun ReleaseCardPreview() {
         Column(modifier = Modifier.padding(16.dp)) {
             ReleaseCard(
                 release = ReleaseItem(
-                    id = "rl_01",
-                    artistName = "Halohalo Sessions",
-                    title = "Halohalo (Reimagined)",
-                    postedAgo = "15 hours ago",
-                    songCount = 1,
+                    id = "preview_release_1",
+                    artistName = "Preview Artist",
+                    title = "Preview Album",
+                    releasedLabel = "2026",
+                    songCount = 10,
                 ),
                 onClick = {},
                 onPlay = {},

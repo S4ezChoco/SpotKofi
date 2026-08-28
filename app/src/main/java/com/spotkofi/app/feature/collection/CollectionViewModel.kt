@@ -6,6 +6,7 @@ import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,8 @@ class CollectionViewModel(
         val tracks: List<Track> = emptyList(),
         val isSaved: Boolean = false,
         val isLoading: Boolean = true,
+        /** Set when the lookup failed, or when the catalog has no such entry. */
+        val error: String? = null,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -32,18 +35,50 @@ class CollectionViewModel(
     val playbackState = player.state
 
     init {
+        load()
+    }
+
+    fun retry() = load()
+
+    private fun load() {
         viewModelScope.launch {
-            // Concurrent, not sequential. The two lookups are independent, so
-            // awaiting them one after the other doubled the time to first paint
-            // for no reason.
-            val collection = async { repository.collection(collectionId) }
-            val tracks = async { repository.tracks(collectionId) }
-            _uiState.update {
-                it.copy(
-                    collection = collection.await(),
-                    tracks = tracks.await(),
-                    isLoading = false,
-                )
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            try {
+                // Concurrent, not sequential. The two lookups are independent, so
+                // awaiting them one after the other doubled the time to first paint
+                // for no reason.
+                val collection = async { repository.collection(collectionId) }
+                val tracks = async { repository.tracks(collectionId) }
+                val resolved = collection.await()
+                if (resolved == null) {
+                    // A null result is not an empty screen, it means the id does
+                    // not exist. Treated as an error so the user gets an
+                    // explanation instead of a permanent spinner.
+                    _uiState.update {
+                        it.copy(isLoading = false, error = "This isn't in the catalog")
+                    }
+                    return@launch
+                }
+                // Recorded here rather than at the tap site, because only a
+                // successful lookup proves the collection is real, and Your
+                // Library is built from this list.
+                repository.recordVisited(resolved)
+                _uiState.update {
+                    it.copy(
+                        collection = resolved,
+                        tracks = tracks.await(),
+                        isLoading = false,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = failure.message ?: "Could not load this",
+                    )
+                }
             }
         }
     }

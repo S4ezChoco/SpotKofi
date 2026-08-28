@@ -8,13 +8,15 @@ import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 
 class HomeViewModel(
     private val repository: MusicRepository,
@@ -33,6 +35,13 @@ class HomeViewModel(
         val quickPicks: List<MediaCollection> = emptyList(),
         val sections: List<HomeSection> = emptyList(),
         val isLoading: Boolean = true,
+        /**
+         * Set when the catalog request failed.
+         *
+         * Needed now that this is real network: mock data could not fail, so a
+         * spinner was the only state a screen ever had to show.
+         */
+        val error: String? = null,
     ) {
         /** Following only exists as an option while Music is the active chip. */
         val followingVisible: Boolean get() = selectedChip == HomeTab.Music
@@ -50,22 +59,43 @@ class HomeViewModel(
         load()
     }
 
+    fun retry() = load()
+
     private fun load() {
         val state = _uiState.value
         val tab = if (state.followingActive) HomeTab.Following else state.selectedChip
 
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            combine(
-                repository.quickPicks(),
-                repository.homeSections(tab),
-            ) { picks, sections -> picks to sections }
-                .collect { (picks, sections) ->
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            try {
+                // Both are network calls now, so they run concurrently rather than
+                // stacking two round trips before Home can paint. A supervisor keeps
+                // one failed catalog request from cancelling the whole ViewModel
+                // before the surrounding error state can be updated.
+                supervisorScope {
+                    val picks = async { repository.quickPicks() }
+                    val sections = async { repository.homeSections(tab) }
                     _uiState.update {
-                        it.copy(quickPicks = picks, sections = sections, isLoading = false)
+                        it.copy(
+                            quickPicks = picks.await(),
+                            sections = sections.await(),
+                            isLoading = false,
+                        )
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                // A tab switch or ViewModel teardown cancelled this load; the new
+                // load or lifecycle owns the state now.
+                throw cancelled
+            } catch (failure: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = failure.message ?: "Could not load music",
+                    )
+                }
+            }
         }
     }
 
