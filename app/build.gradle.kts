@@ -119,6 +119,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     implementation(libs.okhttp)
+    implementation(libs.pipepipe.extractor)
 
     // `ui-tooling` powers the @Preview renderer, debug-only so it is stripped
     // from release builds.

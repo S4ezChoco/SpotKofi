@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.spotkofi.app.data.repository.ItunesMusicRepository
 import com.spotkofi.app.data.repository.MusicRepository
-import com.spotkofi.app.player.ExternalLinkPlayerController
+import com.spotkofi.app.data.service.MusicService
+import com.spotkofi.app.data.service.SimpleYouTubeMusicService
+import com.spotkofi.app.player.MusicPlayerController
 import com.spotkofi.app.player.PlayerController
 
 /**
@@ -24,14 +26,15 @@ class AppContainer(
 ) {
 
     val musicRepository: MusicRepository = ItunesMusicRepository()
+    val musicService: MusicService = SimpleYouTubeMusicService()
+    
+    private val musicPlayerController = MusicPlayerController(context, musicService)
 
-    private val externalLinkPlayerController = ExternalLinkPlayerController(context)
+    val playerController: PlayerController = musicPlayerController
 
-    val playerController: PlayerController = externalLinkPlayerController
-
-    /** Releases the external-link handoff state. */
+    /** Releases the music player controller. */
     fun release() {
-        externalLinkPlayerController.release()
+        musicPlayerController.stop()
     }
 }
 

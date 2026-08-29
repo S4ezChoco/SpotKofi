@@ -88,8 +88,12 @@ data class Track(
     val durationMs: Long,
     val isExplicit: Boolean = false,
     val artworkUrl: String? = null,
+    /** Direct audio preview URL, when the catalog supplies one. */
+    val audioUrl: String? = null,
     /** Official provider page/search URL opened outside the app. */
     val externalUrl: String? = null,
+    /** YouTube video ID for streaming, when available. */
+    val videoId: String? = null,
     /** Album the track belongs to, so a row can navigate to its album. */
     val albumId: String? = null,
     /** Catalog id of the performer, so an artist page can be opened from a track. */
@@ -199,6 +203,8 @@ data class TrackDetails(
     val artistAlbums: List<Album> = emptyList(),
     /** Spotify recommendations resolved back to iTunes metadata. */
     val recommendations: List<Track> = emptyList(),
+    /** Raw lyrics text, if available from lrclib or better-lyrics. */
+    val lyrics: String? = null,
 )
 
 /** The filter chips across the top of Home. */

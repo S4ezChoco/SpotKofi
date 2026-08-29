@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.Text
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -286,6 +287,9 @@ fun SpotKofiApp(
                                     onCollectionClick = {
                                         navController.navigate(CollectionRoute(it))
                                     },
+                                    onTrackClick = { track, queue ->
+                                        container.playerController.play(track, queue)
+                                    },
                                     onOpenProfile = drawerState::open,
                                     contentPadding = screenPadding,
                                 )
@@ -296,6 +300,10 @@ fun SpotKofiApp(
                                         navController.navigate(CollectionRoute(it))
                                     },
                                     onOpenProfile = drawerState::open,
+                                    onSearchClick = {
+                                        activeTab = TopLevelDestination.Search
+                                        navController.switchTab(TopLevelDestination.Search)
+                                    },
                                     onCreate = { showCreateSheet = true },
                                     contentPadding = screenPadding,
                                 )

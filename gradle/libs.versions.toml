@@ -41,6 +41,7 @@ kotlinxSerialization = "1.9.0"
 # Pinned explicitly rather than inherited from Coil, so the HTTP client the app
 # calls the catalog API with is a deliberate choice and not a transitive accident.
 okhttp = "5.5.0"
+pipepipe = "f8982ca9e7"
 
 [libraries]
 # --- Build classpath (not app dependencies) ---
@@ -82,6 +83,9 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 
 # --- Audio playback ---
+# PipePipe is the stream extractor used by the SimpMusic reference. It resolves
+# YouTube audio formats and signatures instead of guessing a URL from raw JSON.
+pipepipe-extractor = { module = "com.github.maxrave-dev:PipePipeExtractor", version.ref = "pipepipe" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

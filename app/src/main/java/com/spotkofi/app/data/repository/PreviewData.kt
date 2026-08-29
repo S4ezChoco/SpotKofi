@@ -132,3 +132,36 @@ fun previewTrackDetails(): TrackDetails = TrackDetails(
 fun previewFriends(): List<FriendActivity> = emptyList()
 
 fun previewConversations(): List<Conversation> = emptyList()
+
+
+// Mock search functionality
+fun mockSearch(query: String): com.spotkofi.app.data.model.SearchResults {
+    val tracks = previewTracks().filter { 
+        it.title.contains(query, ignoreCase = true) || 
+        it.artistName.contains(query, ignoreCase = true)
+    }.take(10)
+    
+    val albums = listOf(sampleAlbum(1), sampleAlbum(2), sampleAlbum(3)).filter {
+        it.title.contains(query, ignoreCase = true) ||
+        it.artistName.contains(query, ignoreCase = true)
+    }.take(5)
+    
+    return com.spotkofi.app.data.model.SearchResults(
+        tracks = tracks,
+        collections = albums
+    )
+}
+
+// Mock search suggestions
+fun mockSearchSuggestions(query: String): List<String> {
+    val suggestions = mutableListOf<String>()
+    
+    if (query.isNotEmpty()) {
+        suggestions.add("$query music")
+        suggestions.add("$query hits")
+        suggestions.add("$query 2024")
+        suggestions.add("best of $query")
+    }
+    
+    return suggestions
+}
