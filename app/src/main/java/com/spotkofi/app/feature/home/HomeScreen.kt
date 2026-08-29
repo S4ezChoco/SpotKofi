@@ -34,6 +34,8 @@ import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.data.model.HomeSection
 import com.spotkofi.app.data.model.HomeTab
 import com.spotkofi.app.data.model.MediaCollection
+import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.data.repository.previewHomeSections
 import com.spotkofi.app.data.repository.previewQuickPicks
 import com.spotkofi.app.data.repository.previewReleaseSections
@@ -47,6 +49,7 @@ import com.spotkofi.app.ui.components.SegmentedChipPair
 import com.spotkofi.app.ui.components.SpotKofiChip
 import com.spotkofi.app.ui.components.SpotlightCard
 import com.spotkofi.app.ui.components.StationCard
+import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.layout.ResponsiveLayout
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
@@ -66,11 +69,14 @@ fun HomeScreen(
         HomeViewModel(container.musicRepository, container.playerController)
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
 
     HomeContent(
         state = state,
         onChipClick = viewModel::onChipClick,
         onCollectionClick = onCollectionClick,
+        onTrackClick = viewModel::onPlayTrack,
+        playingTrackId = playback.track?.id,
         onOpenProfile = onOpenProfile,
         onRetry = viewModel::retry,
         contentPadding = contentPadding,
@@ -83,6 +89,8 @@ private fun HomeContent(
     state: HomeViewModel.UiState,
     onChipClick: (HomeTab) -> Unit,
     onCollectionClick: (String) -> Unit,
+    onTrackClick: (Track, List<Track>) -> Unit,
+    playingTrackId: String?,
     onOpenProfile: () -> Unit,
     onRetry: () -> Unit,
     contentPadding: PaddingValues,
@@ -222,6 +230,8 @@ private fun HomeContent(
                             section = section,
                             layout = layout,
                             onCollectionClick = onCollectionClick,
+                            onTrackClick = onTrackClick,
+                            playingTrackId = playingTrackId,
                         )
                         Spacer(Modifier.height(dimens.shelfSpacing))
                     }
@@ -296,6 +306,8 @@ private fun HomeSectionBlock(
     section: HomeSection,
     layout: ResponsiveLayout,
     onCollectionClick: (String) -> Unit,
+    onTrackClick: (Track, List<Track>) -> Unit,
+    playingTrackId: String?,
 ) {
     val dimens = SpotKofiTheme.dimens
 
@@ -311,6 +323,25 @@ private fun HomeSectionBlock(
                         item = item,
                         onClick = { onCollectionClick(item.id) },
                         width = layout.shelfCardWidth,
+                    )
+                }
+            }
+        }
+
+        is HomeSection.Songs -> {
+            SectionHeader(title = section.title)
+            // Plain rows rather than a LazyRow of cards: these are songs, and a
+            // song row shows the artist and the length, which is what tells the
+            // user this is playable rather than another screen to open.
+            section.items.forEachIndexed { index, track ->
+                Box(modifier = Modifier.staggeredEntry(index)) {
+                    TrackRow(
+                        track = track,
+                        onClick = { onTrackClick(track, section.items) },
+                        isPlaying = track.id == playingTrackId,
+                        trailingText = track.durationMs
+                            .takeIf { it > 0L }
+                            ?.asTrackDuration(),
                     )
                 }
             }
@@ -389,6 +420,8 @@ private fun HomePreview() {
             ),
             onChipClick = {},
             onCollectionClick = {},
+            onTrackClick = { _, _ -> },
+            playingTrackId = null,
             onOpenProfile = {},
             onRetry = {},
             contentPadding = PaddingValues(),
@@ -410,6 +443,8 @@ private fun HomeFollowingPreview() {
             ),
             onChipClick = {},
             onCollectionClick = {},
+            onTrackClick = { _, _ -> },
+            playingTrackId = null,
             onOpenProfile = {},
             onRetry = {},
             contentPadding = PaddingValues(),

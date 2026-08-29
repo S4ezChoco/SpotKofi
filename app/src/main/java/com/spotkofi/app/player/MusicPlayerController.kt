@@ -5,6 +5,7 @@ import android.util.Log
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.RepeatMode
 import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.data.remote.YouTubeTrackResolver
 import com.spotkofi.app.data.service.MusicService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,13 @@ class MusicPlayerController(
     private val musicService: MusicService,
 ) : PlayerController {
 
+    /**
+     * Constructed here rather than injected: the resolver's type is internal to
+     * the module, and exposing it through this public constructor would leak an
+     * internal type into the public API.
+     */
+    private val trackResolver = YouTubeTrackResolver()
+
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val audioPlayer = AudioPlayer(context)
     private var activePlaybackJob: Job? = null
@@ -39,6 +47,15 @@ class MusicPlayerController(
     private var playbackIntent = false
     private var currentVideoId: String? = null
     private var released = false
+
+    /**
+     * Bumped only by [play], never by queue advances.
+     *
+     * The UI uses this to tell "the user picked this track" apart from "the queue
+     * moved on by itself", so finishing a song no longer throws the full player
+     * window back open over whatever the user was doing.
+     */
+    private var playRequestId = 0L
 
     /** Short-lived in-memory cache; resolved YouTube URLs are not metadata IDs. */
     private val streamUrlCache = linkedMapOf<String, String>()
@@ -95,6 +112,8 @@ class MusicPlayerController(
             currentTrackIndex = normalizedQueue.indexOfFirst { it.id == track.id }
                 .coerceAtLeast(0)
             playbackIntent = true
+            // Only an explicit selection counts as intent to see the player.
+            playRequestId++
             requestPlayback(track)
         }
     }
@@ -251,11 +270,12 @@ class MusicPlayerController(
                 positionMs = 0L,
                 error = null,
                 streamDurationMs = track.durationMs.takeIf { duration -> duration > 0L },
+                playRequestId = playRequestId,
             )
         }
 
         activePlaybackJob = coroutineScope.launch {
-            val urlToPlay = try {
+            val resolved = try {
                 resolveStream(track)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -275,38 +295,52 @@ class MusicPlayerController(
 
             if (!isCurrent(generation)) return@launch
 
-            if (urlToPlay.isNullOrBlank()) {
+            if (resolved == null) {
                 playbackIntent = false
                 _state.update {
                     it.copy(
                         isPlaying = false,
-                        error = if (track.videoId.isNullOrBlank()) {
-                            "No playable audio is available for this track"
-                        } else {
-                            "Full-length stream unavailable; preview was not used"
-                        },
+                        error = "No full-length stream was found for this track",
                     )
                 }
                 return@launch
             }
 
-            track.videoId?.trim()?.takeIf { it.isNotEmpty() }?.let { videoId ->
-                cacheStreamUrl(videoId, urlToPlay)
+            resolved.videoId?.let { videoId ->
+                currentVideoId = videoId
+                cacheStreamUrl(videoId, resolved.url)
             }
-            audioPlayer.play(urlToPlay, autoPlay = playbackIntent)
+            audioPlayer.play(resolved.url, autoPlay = playbackIntent)
         }
     }
 
-    private suspend fun resolveStream(track: Track): String? {
-        val videoId = track.videoId?.trim()?.takeIf { it.isNotEmpty() }
-        return if (videoId != null) {
-            streamUrlCache[videoId] ?: withContext(Dispatchers.IO) {
-                musicService.getStreamUrl(videoId)
+    /**
+     * Resolves the audio to hand the decoder.
+     *
+     * Tracks from the iTunes catalog carry no video ID, so one is looked up on
+     * demand. There is deliberately no 30-second preview fallback: playing a
+     * clip silently instead of the song is the bug this replaced.
+     */
+    private suspend fun resolveStream(track: Track): ResolvedStream? {
+        val videoId = withContext(Dispatchers.IO) { trackResolver.resolveVideoId(track) }
+
+        if (videoId != null) {
+            streamUrlCache[videoId]?.let { cached ->
+                return ResolvedStream(videoId, cached)
             }
-        } else {
-            track.audioUrl?.trim()?.takeIf { it.isNotEmpty() }
+            val url = withContext(Dispatchers.IO) { musicService.getStreamUrl(videoId) }
+            return url?.trim()?.takeIf { it.isNotEmpty() }?.let { ResolvedStream(videoId, it) }
         }
+
+        // Only a genuine direct/offline URL. The catalog mapper no longer supplies
+        // preview clips here, so this can never degrade a song to 0:30.
+        return track.audioUrl
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { ResolvedStream(videoId = null, url = it) }
     }
+
+    private data class ResolvedStream(val videoId: String?, val url: String)
 
     private fun handlePlaybackCompleted() {
         if (released) return

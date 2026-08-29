@@ -254,6 +254,20 @@ sealed interface HomeSection {
         override val title: String,
         val items: List<ReleaseItem>,
     ) : HomeSection
+
+    /**
+     * Directly playable song rows, the way the reference app surfaces its
+     * recommendations.
+     *
+     * Home previously held nothing but albums and artists, so every tap was a
+     * navigation and the only way to reach a song was through a detail screen.
+     * These carry real tracks, so a recommendation can be played from Home.
+     */
+    data class Songs(
+        override val id: String,
+        override val title: String,
+        val items: List<Track>,
+    ) : HomeSection
 }
 
 data class SearchResults(
@@ -295,6 +309,16 @@ data class PlaybackState(
 
     /** Set when playback failed or the track has no stream. Null when fine. */
     val error: String? = null,
+
+    /**
+     * Counts explicit user play requests, and nothing else.
+     *
+     * Increments when someone taps a track; it does NOT change when the queue
+     * advances on its own or when next/previous is pressed. That distinction is
+     * what lets the host open Now Playing on a real selection while leaving the
+     * player collapsed when a finished song simply rolls into the next one.
+     */
+    val playRequestId: Long = 0L,
 ) {
     val hasTrack: Boolean get() = track != null
 
@@ -309,6 +333,10 @@ data class PlaybackState(
             if (duration <= 0L) return 0f
             return (positionMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
         }
+
+    /** Time left in the current track, for the "when does this end" readout. */
+    val remainingMs: Long
+        get() = (effectiveDurationMs - positionMs).coerceAtLeast(0L)
 }
 
 /** Formats a duration as m:ss, the format used in track lists. */

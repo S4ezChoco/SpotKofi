@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.spotkofi.app.data.model.HomeSection
 import com.spotkofi.app.data.model.HomeTab
 import com.spotkofi.app.data.model.MediaCollection
+import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
@@ -112,5 +113,14 @@ class HomeViewModel(
         load()
     }
 
-    fun onPlayTrack(track: Track) = player.play(track, listOf(track))
+    /** Playback state, so a Home song row can mark itself as the active track. */
+    val playbackState: StateFlow<PlaybackState> = player.state
+
+    /**
+     * Plays a Home recommendation, keeping the rest of its shelf as the queue so
+     * the song rolls into related tracks instead of stopping after one.
+     */
+    fun onPlayTrack(track: Track, queue: List<Track> = listOf(track)) {
+        player.play(track, queue.ifEmpty { listOf(track) })
+    }
 }

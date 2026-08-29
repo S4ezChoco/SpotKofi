@@ -158,11 +158,16 @@ fun SpotKofiApp(
                 playerPos.floatValue = 0f
             }
 
-            // Track selection used to leave the full player at its dismissed
-            // position, so only the mini-player was visible. Open Now Playing
-            // as soon as a track is selected; collapsing it remains explicit.
-            LaunchedEffect(playbackState.track?.id) {
-                if (playbackState.hasTrack) openPlayer()
+            // Keyed on the play-request counter, NOT on the track id.
+            //
+            // Keying on the track id meant every change of current track reopened
+            // this window, so a song finishing and rolling into the next one threw
+            // the full player over whatever the user was doing. The counter only
+            // moves when someone actually taps a track, so an automatic queue
+            // advance (and next/previous) now leaves the player exactly as the
+            // user left it.
+            LaunchedEffect(playbackState.playRequestId) {
+                if (playbackState.playRequestId > 0L && playbackState.hasTrack) openPlayer()
             }
 
             val backStackEntry by navController.currentBackStackEntryAsState()
@@ -264,14 +269,25 @@ fun SpotKofiApp(
                             // or shrinks reads as the window moving towards or away
                             // from the viewer, which is the "receding then closing"
                             // effect that looked wrong on back.
-                            enterTransition = { fadeIn(tween(200)) },
-                            exitTransition = { fadeOut(tween(140)) },
+                            //
+                            // The incoming fade is longer than the outgoing one and
+                            // eased, so the two overlap instead of handing off at a
+                            // hard edge. Timings come from Motion rather than being
+                            // invented here.
+                            enterTransition = {
+                                fadeIn(tween(Motion.Medium, easing = Motion.Emphasized))
+                            },
+                            exitTransition = {
+                                fadeOut(tween(Motion.Fast, easing = Motion.Standard))
+                            },
                             // Nothing at all on the way back. On a pop the screen
                             // underneath was never gone, so animating it in makes it
                             // look like a fresh screen arriving. It should simply be
                             // uncovered as the one above slides away.
                             popEnterTransition = { EnterTransition.None },
-                            popExitTransition = { fadeOut(tween(140)) },
+                            popExitTransition = {
+                                fadeOut(tween(Motion.Fast, easing = Motion.Standard))
+                            },
                         ) {
                             composable<HomeRoute> {
                                 HomeScreen(
@@ -282,6 +298,7 @@ fun SpotKofiApp(
                                     contentPadding = screenPadding,
                                 )
                             }
+
                             composable<SearchRoute> {
                                 SearchScreen(
                                     onCollectionClick = {
@@ -313,15 +330,32 @@ fun SpotKofiApp(
                             // is what tells the user which way back is.
                             composable<CollectionRoute>(
                                 enterTransition = {
-                                    slideInHorizontally(tween(280, easing = Motion.Emphasized)) { it }
+                                    slideInHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Emphasized),
+                                    ) { it }
                                 },
-                                exitTransition = { fadeOut(tween(140)) },
+                                // The outgoing screen drifts a fraction of the way
+                                // left instead of fading. That parallax is what makes
+                                // the detail read as sitting on top of the tab rather
+                                // than replacing it, and it costs no legibility.
+                                exitTransition = {
+                                    slideOutHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Emphasized),
+                                    ) { -it / 6 }
+                                },
+                                popEnterTransition = {
+                                    slideInHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Emphasized),
+                                    ) { -it / 6 }
+                                },
                                 // Slide only, no fade. Fading while sliding makes the
                                 // screen go translucent mid-motion, so for a moment
                                 // both screens are visible through each other, and
                                 // that smear is the ugly part of the close.
                                 popExitTransition = {
-                                    slideOutHorizontally(tween(260, easing = Motion.Accelerate)) { it }
+                                    slideOutHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Accelerate),
+                                    ) { it }
                                 },
                             ) { entry ->
                                 val route = entry.toRoute<CollectionRoute>()
@@ -333,10 +367,24 @@ fun SpotKofiApp(
                             }
                             composable<SettingsRoute>(
                                 enterTransition = {
-                                    slideInHorizontally(tween(280, easing = Motion.Emphasized)) { it }
+                                    slideInHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Emphasized),
+                                    ) { it }
+                                },
+                                exitTransition = {
+                                    slideOutHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Emphasized),
+                                    ) { -it / 6 }
+                                },
+                                popEnterTransition = {
+                                    slideInHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Emphasized),
+                                    ) { -it / 6 }
                                 },
                                 popExitTransition = {
-                                    slideOutHorizontally(tween(260, easing = Motion.Accelerate)) { it }
+                                    slideOutHorizontally(
+                                        tween(Motion.Medium, easing = Motion.Accelerate),
+                                    ) { it }
                                 },
                             ) {
                                 SettingsScreen(
@@ -473,12 +521,16 @@ fun SpotKofiApp(
 }
 
 /**
- * Tab switching that always lands on the tab itself.
+ * Tab switching that preserves each tab's own state.
  *
- * Deliberately no `saveState` / `restoreState`. Those restore each tab's nested
- * stack, so opening a playlist under Home and later pressing Home would return to
- * the playlist rather than to Home. Popping to the start destination instead means
- * a tab press is always a reset, and Home means Home.
+ * `saveState`/`restoreState` were previously left off so that a tab press was
+ * always a reset. That is a defensible rule, but it also destroyed the tab's
+ * composition and its ViewModel on every switch, so returning to a tab re-ran its
+ * network loads and threw away scroll position. That rebuild is the stutter felt
+ * when moving between tabs, and no amount of transition tuning hides it.
+ *
+ * State is now saved and restored, so switching tabs is a swap of already-built
+ * screens rather than a reload.
  */
 private fun NavHostController.switchTab(destination: TopLevelDestination) {
     val route: Any = when (destination) {
@@ -489,7 +541,11 @@ private fun NavHostController.switchTab(destination: TopLevelDestination) {
         TopLevelDestination.Create -> return
     }
     navigate(route) {
-        popUpTo(graph.findStartDestination().id) { inclusive = false }
+        popUpTo(graph.findStartDestination().id) {
+            inclusive = false
+            saveState = true
+        }
         launchSingleTop = true
+        restoreState = true
     }
 }

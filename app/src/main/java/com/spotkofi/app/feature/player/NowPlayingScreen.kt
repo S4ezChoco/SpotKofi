@@ -1,5 +1,7 @@
 package com.spotkofi.app.feature.player
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
@@ -48,6 +50,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -90,6 +94,7 @@ import com.spotkofi.app.data.repository.previewTrack
 import com.spotkofi.app.data.repository.previewTrackDetails
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.MediaCard
+import com.spotkofi.app.ui.components.TrackOptionsSheet
 import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.motion.clickableScale
 import com.spotkofi.app.ui.theme.ErrorRed
@@ -188,6 +193,34 @@ private fun NowPlayingContent(
     // The compact bar takes over once the hero has scrolled past.
     val collapsed by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
 
+    var showOptions by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Hand-off intents are built here rather than in the sheet so the sheet stays
+    // a dumb list of rows and can be previewed without a real Context.
+    val shareTrack: (Track) -> Unit = remember(context) {
+        { shared ->
+            shared.externalUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "${shared.title} - ${shared.artistName}")
+                    putExtra(Intent.EXTRA_TEXT, "${shared.title} - ${shared.artistName}\n$url")
+                }
+                runCatching {
+                    context.startActivity(Intent.createChooser(intent, "Share track"))
+                }
+            }
+        }
+    }
+    val openExternally: (Track) -> Unit = remember(context) {
+        { opened ->
+            opened.externalUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                }
+            }
+        }
+    }
+
     // This screen deliberately owns NO drag position.
     //
     // It used to keep its own `dragPx`, which meant two sources of truth: this
@@ -218,6 +251,7 @@ private fun NowPlayingContent(
                         onCollapse = onCollapse,
                         onDrag = onDrag,
                         onDragStopped = onDragStopped,
+                        onMoreOptions = { showOptions = true },
                     )
                 }
             }
@@ -233,14 +267,6 @@ private fun NowPlayingContent(
                     )
                     Spacer(Modifier.height(dimens.spaceSm))
                     Scrubber(state = state, onSeek = onSeek)
-                    if (track.isExternallyOpenable) {
-                        Spacer(Modifier.height(dimens.spaceXs))
-                        Text(
-                            text = "Opens the official YouTube app or browser",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.textSecondary,
-                        )
-                    }
                     state.error?.let { error ->
                         Spacer(Modifier.height(dimens.spaceXs))
                         Text(
@@ -261,7 +287,12 @@ private fun NowPlayingContent(
                         onCycleRepeat = onCycleRepeat,
                     )
                     Spacer(Modifier.height(dimens.spaceMd))
-                    SecondaryRow(deviceName = state.deviceName)
+                    SecondaryRow(
+                        deviceName = state.deviceName,
+                        canShare = track.isExternallyOpenable,
+                        onShare = { shareTrack(track) },
+                        onMoreOptions = { showOptions = true },
+                    )
                     Spacer(Modifier.height(dimens.spaceXl))
                 }
             }
@@ -337,6 +368,25 @@ private fun NowPlayingContent(
                 onToggleSaved = onToggleSaved,
             )
         }
+
+        // Placed last inside the page Box so it covers the list and the collapsed
+        // bar, and so its scrim dims the artwork behind it.
+        TrackOptionsSheet(
+            visible = showOptions,
+            track = track,
+            isSaved = state.isSaved,
+            isShuffled = state.isShuffled,
+            repeatMode = state.repeatMode,
+            remainingMs = state.remainingMs,
+            onDismiss = { showOptions = false },
+            onToggleSaved = onToggleSaved,
+            onToggleShuffle = onToggleShuffle,
+            onCycleRepeat = onCycleRepeat,
+            onOpenAlbum = onCollectionClick,
+            onOpenArtist = onCollectionClick,
+            onShare = shareTrack,
+            onOpenExternally = openExternally,
+        )
     }
 }
 
@@ -349,6 +399,7 @@ private fun HeroArtwork(
     onCollapse: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
+    onMoreOptions: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -411,7 +462,7 @@ private fun HeroArtwork(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { /* Phase 5: queue and device options */ }) {
+            IconButton(onClick = onMoreOptions) {
                 Icon(
                     imageVector = Icons.Filled.MoreVert,
                     contentDescription = stringResource(R.string.cd_more_options),
@@ -467,14 +518,9 @@ private fun TrackInfoRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(onClick = { /* Phase 5: dismiss from queue */ }) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "Remove from queue",
-                tint = colors.textPrimary,
-                modifier = Modifier.size(dimens.iconMd),
-            )
-        }
+        // The former "remove from queue" button lived here and did nothing. A
+        // control that looks live but is inert is worse than no control, so it is
+        // gone until queue editing exists.
         SavedCheck(isSaved = isSaved, onClick = onToggleSaved)
     }
 }
@@ -537,15 +583,20 @@ private fun Scrubber(
             modifier = Modifier.fillMaxWidth(),
         )
         val durationMs = state.effectiveDurationMs
+        val elapsedMs = (durationMs * fraction).toLong()
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = (durationMs * fraction).toLong().asTrackDuration(),
+                text = elapsedMs.asTrackDuration(),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
             Spacer(Modifier.weight(1f))
+            // Time remaining rather than total length. During a scrub this counts
+            // down from the dragged position, so it answers "when does this end"
+            // for the place the finger is, which is the question the seek bar is
+            // actually being used to ask.
             Text(
-                text = durationMs.asTrackDuration(),
+                text = "-" + (durationMs - elapsedMs).coerceAtLeast(0L).asTrackDuration(),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
@@ -645,7 +696,12 @@ private fun WhitePlayButton(isPlaying: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SecondaryRow(deviceName: String?) {
+private fun SecondaryRow(
+    deviceName: String?,
+    canShare: Boolean,
+    onShare: () -> Unit,
+    onMoreOptions: () -> Unit,
+) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
@@ -653,32 +709,38 @@ private fun SecondaryRow(deviceName: String?) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Status, not a control. There is no cast support to hand a tap to, and
+        // the previous version was a button with an empty body.
         Icon(
             imageVector = Icons.Filled.Computer,
-            contentDescription = stringResource(R.string.cd_connect_device),
+            contentDescription = if (deviceName != null) {
+                stringResource(R.string.cd_connect_device)
+            } else {
+                null
+            },
             tint = if (deviceName != null) colors.accent else colors.textSecondary,
-            modifier = Modifier
-                .size(dimens.iconMd)
-                .clickable { },
+            modifier = Modifier.size(dimens.iconMd),
         )
         Spacer(Modifier.weight(1f))
-        Icon(
-            imageVector = Icons.Filled.Share,
-            contentDescription = "Share",
-            tint = colors.textSecondary,
-            modifier = Modifier
-                .size(dimens.iconMd)
-                .clickable { },
-        )
-        Spacer(Modifier.width(dimens.spaceXl))
-        Icon(
-            imageVector = Icons.Filled.QueueMusic,
-            contentDescription = "Queue",
-            tint = colors.textSecondary,
-            modifier = Modifier
-                .size(dimens.iconMd)
-                .clickable { },
-        )
+        if (canShare) {
+            IconButton(onClick = onShare) {
+                Icon(
+                    imageVector = Icons.Filled.Share,
+                    contentDescription = "Share",
+                    tint = colors.textSecondary,
+                    modifier = Modifier.size(dimens.iconMd),
+                )
+            }
+            Spacer(Modifier.width(dimens.spaceSm))
+        }
+        IconButton(onClick = onMoreOptions) {
+            Icon(
+                imageVector = Icons.Filled.Tune,
+                contentDescription = stringResource(R.string.cd_more_options),
+                tint = colors.textSecondary,
+                modifier = Modifier.size(dimens.iconMd),
+            )
+        }
     }
 }
 
@@ -889,6 +951,7 @@ private fun NowPlayingPreview() {
             onCollapse = {},
             onCollectionClick = {},
             onPlayTrack = {},
+
             onDrag = {},
             onDragStopped = {},
             onTogglePlayPause = {},

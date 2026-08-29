@@ -9,17 +9,10 @@ import java.nio.charset.StandardCharsets
 /** Converts iTunes metadata into provider-neutral app models. */
 internal object ItunesMapper {
 
-    private val youtubeVideoIdRegex = Regex("v=([a-zA-Z0-9_-]{11})")
-
     fun toTrack(result: ItunesResult, videoId: String? = null): Track? {
         val rawTrackId = result.trackId ?: return null
         val title = result.trackName?.trim().orEmpty().takeIf { it.isNotEmpty() } ?: return null
         val artist = result.artistName?.trim().orEmpty().ifBlank { "Unknown artist" }
-
-        val externalUrl = youtubeSearchUrl(artist, title)
-        
-        // Use provided videoId or extract from search URL
-        val videoIdToUse = videoId ?: extractYouTubeVideoId(externalUrl)
 
         return Track(
             id = trackId(rawTrackId),
@@ -29,16 +22,16 @@ internal object ItunesMapper {
             durationMs = result.trackTimeMillis?.coerceAtLeast(0L) ?: 0L,
             isExplicit = result.trackExplicitness.equals("explicit", ignoreCase = true),
             artworkUrl = artwork(result),
-            audioUrl = result.previewUrl?.trim()?.takeIf { it.isNotEmpty() },
-            externalUrl = externalUrl,
-            videoId = videoIdToUse,
+            // Deliberately NOT result.previewUrl. The catalog preview is a
+            // 30-second clip, and wiring it in here is what made album and
+            // recommendation rows cut off at 0:30 while search played in full.
+            // The player resolves a full YouTube stream for these tracks instead.
+            audioUrl = null,
+            externalUrl = youtubeSearchUrl(artist, title),
+            videoId = videoId,
             albumId = result.collectionId?.let(::albumId),
             artistId = result.artistId?.let(::artistId),
         )
-    }
-
-    private fun extractYouTubeVideoId(url: String): String? {
-        return youtubeVideoIdRegex.find(url)?.groupValues?.get(1)
     }
 
     fun toTracks(results: List<ItunesResult>): List<Track> = results

@@ -66,15 +66,32 @@ class ItunesMusicRepository internal constructor(
         when (tab) {
             HomeTab.All -> {
                 val albums = async { cachedAlbums("new music", limit = 12) }
-                val tracks = async { cachedTracks("popular music", limit = 20) }
+                // Song shelves come first in the request order because they are
+                // the only Home content that can be played without a detour
+                // through a detail screen.
+                val picks = async { cachedTracks("popular music", limit = 20) }
+                val fresh = async { cachedTracks("new songs this week", limit = 20) }
                 buildList {
+                    picks.await().take(SONG_SHELF_LIMIT).takeIf { it.isNotEmpty() }?.let { values ->
+                        add(HomeSection.Songs("itunes_quick_songs", "Quick picks", values))
+                    }
                     albums.await().firstOrNull()?.let { spotlight ->
                         add(HomeSection.Spotlight("itunes_spotlight", "New releases", spotlight))
+                    }
+                    fresh.await().take(SONG_SHELF_LIMIT).takeIf { it.isNotEmpty() }?.let { values ->
+                        add(HomeSection.Songs("itunes_fresh_songs", "Fresh finds", values))
                     }
                     albums.await().takeIf { it.isNotEmpty() }?.let { values ->
                         add(HomeSection.Cards("itunes_new_albums", "New albums", values))
                     }
-                    artistsOf(tracks.await()).takeIf { it.isNotEmpty() }?.let { values ->
+                    picks.await()
+                        .drop(SONG_SHELF_LIMIT)
+                        .take(SONG_SHELF_LIMIT)
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { values ->
+                            add(HomeSection.Songs("itunes_more_songs", "More of what you like", values))
+                        }
+                    artistsOf(picks.await()).takeIf { it.isNotEmpty() }?.let { values ->
                         add(HomeSection.Cards("itunes_artists", "Artists to explore", values))
                     }
                 }
@@ -84,9 +101,16 @@ class ItunesMusicRepository internal constructor(
                 val pop = async { cachedAlbums("pop music", limit = 12) }
                 val rock = async { cachedAlbums("rock music", limit = 12) }
                 val tracks = async { cachedTracks("top music", limit = 20) }
+                val opm = async { cachedTracks("opm hits", limit = 20) }
                 buildList {
+                    tracks.await().take(SONG_SHELF_LIMIT).takeIf { it.isNotEmpty() }?.let { values ->
+                        add(HomeSection.Songs("itunes_top_songs", "Top songs", values))
+                    }
                     pop.await().takeIf { it.isNotEmpty() }?.let { values ->
                         add(HomeSection.Cards("itunes_pop", "Pop albums", values))
+                    }
+                    opm.await().take(SONG_SHELF_LIMIT).takeIf { it.isNotEmpty() }?.let { values ->
+                        add(HomeSection.Songs("itunes_opm_songs", "OPM picks", values))
                     }
                     rock.await().takeIf { it.isNotEmpty() }?.let { values ->
                         add(HomeSection.Cards("itunes_rock", "Rock albums", values))
@@ -406,6 +430,9 @@ class ItunesMusicRepository internal constructor(
         const val MAX_VISITED = 40
         const val TRACK_LIMIT = 50
         const val RECOMMENDATION_LIMIT = 8
+
+        /** Rows per song shelf on Home. Long shelves push the albums off-screen. */
+        const val SONG_SHELF_LIMIT = 6
 
         val BrowseGenres = listOf(
             BrowseCategory("tc_music", "Music"),

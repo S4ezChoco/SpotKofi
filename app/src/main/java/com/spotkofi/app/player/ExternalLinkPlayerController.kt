@@ -37,6 +37,8 @@ class ExternalLinkPlayerController(context: Context) : PlayerController {
                 streamDurationMs = null,
                 error = null,
                 deviceName = null,
+                // Only an explicit selection asks the host to reveal the player.
+                playRequestId = it.playRequestId + 1,
             )
         }
         if (!launcher.open(selected)) {
