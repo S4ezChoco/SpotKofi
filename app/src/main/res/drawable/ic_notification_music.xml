@@ -1,0 +1,16 @@
+<!--
+  Status-bar glyph for the playback notification.
+
+  Notification small icons are drawn as a flat silhouette by the system, so this
+  is a single opaque path with no colour information of its own.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M13,3V13.6A3.6,3.6 0 1 0 15,16.8V7.4H19.5V3H13Z" />
+</vector>

@@ -41,10 +41,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Text
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.navigation
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
@@ -57,13 +60,18 @@ import com.spotkofi.app.feature.player.NowPlayingScreen
 import com.spotkofi.app.feature.profile.ProfileDrawer
 import com.spotkofi.app.feature.search.SearchScreen
 import com.spotkofi.app.feature.settings.SettingsScreen
+import com.spotkofi.app.ui.components.CreateOption
+import com.spotkofi.app.ui.components.CreatePlaylistDialog
 import com.spotkofi.app.ui.components.CreateSheet
 import com.spotkofi.app.ui.components.MiniPlayer
 import com.spotkofi.app.ui.components.SpotKofiDrawer
 import com.spotkofi.app.ui.components.rememberSpotKofiDrawerState
 import com.spotkofi.app.ui.navigation.CollectionRoute
+import com.spotkofi.app.ui.navigation.HomeGraph
 import com.spotkofi.app.ui.navigation.HomeRoute
+import com.spotkofi.app.ui.navigation.LibraryGraph
 import com.spotkofi.app.ui.navigation.LibraryRoute
+import com.spotkofi.app.ui.navigation.SearchGraph
 import com.spotkofi.app.ui.navigation.SearchRoute
 import com.spotkofi.app.ui.navigation.SettingsRoute
 import com.spotkofi.app.ui.navigation.SpotKofiBottomBar
@@ -113,6 +121,7 @@ fun SpotKofiApp(
             val playbackState by container.playerController.state.collectAsStateWithLifecycle()
 
             var showCreateSheet by remember { mutableStateOf(false) }
+            var showPlaylistDialog by remember { mutableStateOf(false) }
 
             // ---------------- Player position: one value, one owner ----------------
             // 0 = fully open, 1 = fully off the bottom. This single number drives the
@@ -149,6 +158,19 @@ fun SpotKofiApp(
                 }
             }
 
+            /**
+             * Closing the player also stops playback.
+             *
+             * Dismissing is the only gesture that means "I am done with this
+             * song": collapsing with the chevron, pressing back and opening an
+             * album from the player all keep audio running and go through
+             * [settlePlayer] instead.
+             */
+            fun closePlayer() {
+                container.playerController.stop()
+                settlePlayer(open = false)
+            }
+
             fun openPlayer() {
                 // Make the video surface visible immediately. The old path only
                 // started an animation from the dismissed position; in practice
@@ -175,10 +197,24 @@ fun SpotKofiApp(
 
             val isSettings = destination?.hasRoute(SettingsRoute::class) == true
 
-            // Tracked rather than derived from the destination, because a collection
-            // opened from Search should keep Search highlighted. Deriving it would
-            // fall through to Home for every non-tab route.
-            var activeTab by remember { mutableStateOf(TopLevelDestination.Home) }
+            // Derived from the destination's graph, not tracked in local state.
+            //
+            // Tracking it meant the bar could claim a tab was active while
+            // navigation had actually left the user somewhere else. Reading the
+            // hierarchy makes that impossible, and a collection opened from Search
+            // still keeps Search highlighted because it lives in the Search graph.
+            val activeTab = remember(destination) {
+                when {
+                    destination == null -> TopLevelDestination.Home
+                    destination.hierarchy.any { it.hasRoute(SearchGraph::class) } ->
+                        TopLevelDestination.Search
+
+                    destination.hierarchy.any { it.hasRoute(LibraryGraph::class) } ->
+                        TopLevelDestination.Library
+
+                    else -> TopLevelDestination.Home
+                }
+            }
 
             /** True when the current destination IS the tab screen, not something above it. */
             fun isOnTabRoot(tab: TopLevelDestination): Boolean = when (tab) {
@@ -263,7 +299,7 @@ fun SpotKofiApp(
                     ) {
                         NavHost(
                             navController = navController,
-                            startDestination = HomeRoute,
+                            startDestination = HomeGraph,
                             modifier = Modifier.fillMaxSize(),
                             // Tab switches cross-fade. No scale: a screen that grows
                             // or shrinks reads as the window moving towards or away
@@ -289,82 +325,59 @@ fun SpotKofiApp(
                                 fadeOut(tween(Motion.Fast, easing = Motion.Standard))
                             },
                         ) {
-                            composable<HomeRoute> {
-                                HomeScreen(
-                                    onCollectionClick = {
-                                        navController.navigate(CollectionRoute(it))
-                                    },
-                                    onOpenProfile = drawerState::open,
-                                    contentPadding = screenPadding,
-                                )
+                            // One nested graph per tab, each carrying its own copy of
+                            // the collection destination. That is what gives every tab
+                            // an independent detail stack and makes save/restore key
+                            // per tab instead of per route.
+                            navigation<HomeGraph>(startDestination = HomeRoute) {
+                                composable<HomeRoute> {
+                                    HomeScreen(
+                                        onCollectionClick = {
+                                            navController.navigate(CollectionRoute(it))
+                                        },
+                                        onOpenProfile = drawerState::open,
+                                        contentPadding = screenPadding,
+                                    )
+                                }
+                                collectionDestination(navController, screenPadding)
                             }
 
-                            composable<SearchRoute> {
-                                SearchScreen(
-                                    onCollectionClick = {
-                                        navController.navigate(CollectionRoute(it))
-                                    },
-                                    onTrackClick = { track, queue ->
-                                        container.playerController.play(track, queue)
-                                    },
-                                    onOpenProfile = drawerState::open,
-                                    contentPadding = screenPadding,
-                                )
+                            navigation<SearchGraph>(startDestination = SearchRoute) {
+                                composable<SearchRoute> {
+                                    SearchScreen(
+                                        onCollectionClick = {
+                                            navController.navigate(CollectionRoute(it))
+                                        },
+                                        onTrackClick = { track, queue ->
+                                            container.playerController.play(track, queue)
+                                        },
+                                        onOpenProfile = drawerState::open,
+                                        contentPadding = screenPadding,
+                                    )
+                                }
+                                collectionDestination(navController, screenPadding)
                             }
-                            composable<LibraryRoute> {
-                                LibraryScreen(
-                                    onCollectionClick = {
-                                        navController.navigate(CollectionRoute(it))
-                                    },
-                                    onOpenProfile = drawerState::open,
-                                    onSearchClick = {
-                                        activeTab = TopLevelDestination.Search
-                                        navController.switchTab(TopLevelDestination.Search)
-                                    },
-                                    onCreate = { showCreateSheet = true },
-                                    contentPadding = screenPadding,
-                                )
+
+                            navigation<LibraryGraph>(startDestination = LibraryRoute) {
+                                composable<LibraryRoute> {
+                                    LibraryScreen(
+                                        onCollectionClick = {
+                                            navController.navigate(CollectionRoute(it))
+                                        },
+                                        onTrackClick = { track, queue ->
+                                            container.playerController.play(track, queue)
+                                        },
+                                        onOpenProfile = drawerState::open,
+                                        onSearchClick = {
+                                            navController.switchTab(TopLevelDestination.Search)
+                                        },
+                                        onCreate = { showCreateSheet = true },
+                                        contentPadding = screenPadding,
+                                    )
+                                }
+                                collectionDestination(navController, screenPadding)
                             }
-                            // Detail is a push, so it slides in from the trailing
-                            // edge and slides back out the same way. The direction
-                            // is what tells the user which way back is.
-                            composable<CollectionRoute>(
-                                enterTransition = {
-                                    slideInHorizontally(
-                                        tween(Motion.Medium, easing = Motion.Emphasized),
-                                    ) { it }
-                                },
-                                // The outgoing screen drifts a fraction of the way
-                                // left instead of fading. That parallax is what makes
-                                // the detail read as sitting on top of the tab rather
-                                // than replacing it, and it costs no legibility.
-                                exitTransition = {
-                                    slideOutHorizontally(
-                                        tween(Motion.Medium, easing = Motion.Emphasized),
-                                    ) { -it / 6 }
-                                },
-                                popEnterTransition = {
-                                    slideInHorizontally(
-                                        tween(Motion.Medium, easing = Motion.Emphasized),
-                                    ) { -it / 6 }
-                                },
-                                // Slide only, no fade. Fading while sliding makes the
-                                // screen go translucent mid-motion, so for a moment
-                                // both screens are visible through each other, and
-                                // that smear is the ugly part of the close.
-                                popExitTransition = {
-                                    slideOutHorizontally(
-                                        tween(Motion.Medium, easing = Motion.Accelerate),
-                                    ) { it }
-                                },
-                            ) { entry ->
-                                val route = entry.toRoute<CollectionRoute>()
-                                CollectionScreen(
-                                    collectionId = route.id,
-                                    onBack = navController::popBackStack,
-                                    contentPadding = screenPadding,
-                                )
-                            }
+
                             composable<SettingsRoute>(
                                 enterTransition = {
                                     slideInHorizontally(
@@ -413,8 +426,12 @@ fun SpotKofiApp(
                                     state = playbackState,
                                     onClick = ::openPlayer,
                                     onTogglePlayPause = container.playerController::togglePlayPause,
-                                    onAddToLibrary = container.playerController::toggleSaved,
-                                    onConnectDevice = { },
+                                    onToggleSaved = container.playerController::toggleSaved,
+                                    // Swiping the collapsed card down closes the
+                                    // player, and closing the player stops the
+                                    // audio. A card that vanishes while the song
+                                    // keeps going would leave no way back to it.
+                                    onClose = ::closePlayer,
                                 )
                             }
                         }
@@ -423,7 +440,23 @@ fun SpotKofiApp(
                         CreateSheet(
                             visible = showCreateSheet,
                             onDismiss = { showCreateSheet = false },
-                            onOptionClick = { showCreateSheet = false },
+                            onOptionClick = { option ->
+                                showCreateSheet = false
+                                if (option == CreateOption.Playlist) {
+                                    showPlaylistDialog = true
+                                }
+                            },
+                        )
+
+                        CreatePlaylistDialog(
+                            visible = showPlaylistDialog,
+                            onDismiss = { showPlaylistDialog = false },
+                            onCreate = { name, description ->
+                                scope.launch {
+                                    container.localStore.createPlaylist(name, description)
+                                    showPlaylistDialog = false
+                                }
+                            },
                         )
 
                         // ---- Floating nav bar, on top of the Create scrim ----
@@ -448,13 +481,23 @@ fun SpotKofiApp(
                                         showCreateSheet = !showCreateSheet
                                     } else {
                                         showCreateSheet = false
-                                        // Already standing on that tab's own screen:
-                                        // do nothing. Navigating would pop and
-                                        // re-push it, destroying and rebuilding the
-                                        // screen, which is the reload being seen.
-                                        if (!isOnTabRoot(tapped)) {
-                                            activeTab = tapped
-                                            navController.switchTab(tapped)
+                                        when {
+                                            // Already standing on that tab's own
+                                            // screen: do nothing. Navigating would
+                                            // pop and re-push it, destroying and
+                                            // rebuilding the screen, which is the
+                                            // reload being seen.
+                                            isOnTabRoot(tapped) -> Unit
+
+                                            // Deep inside the tab that is already
+                                            // active: the tap means "take me back to
+                                            // the top of this tab". Handled as an
+                                            // explicit pop so it cannot depend on
+                                            // saved-state restoration.
+                                            tapped == activeTab ->
+                                                navController.popToTabRoot(tapped)
+
+                                            else -> navController.switchTab(tapped)
                                         }
                                     }
                                 },
@@ -509,6 +552,11 @@ fun SpotKofiApp(
                                 onDragStopped = { velocity ->
                                     val dismiss = playerPos.floatValue > DISMISS_FRACTION ||
                                         velocity > DISMISS_VELOCITY_PX
+                                    if (dismiss) {
+                                        // Swiping the page away closes the song, not
+                                        // just the window.
+                                        container.playerController.stop()
+                                    }
                                     settlePlayer(open = !dismiss, velocityPxPerSec = velocity)
                                 },
                             )
@@ -533,19 +581,76 @@ fun SpotKofiApp(
  * screens rather than a reload.
  */
 private fun NavHostController.switchTab(destination: TopLevelDestination) {
-    val route: Any = when (destination) {
-        TopLevelDestination.Home -> HomeRoute
-        TopLevelDestination.Search -> SearchRoute
-        TopLevelDestination.Library -> LibraryRoute
+    val graphRoute: Any = when (destination) {
+        TopLevelDestination.Home -> HomeGraph
+        TopLevelDestination.Search -> SearchGraph
+        TopLevelDestination.Library -> LibraryGraph
         // Create never routes; the caller intercepts it before reaching here.
         TopLevelDestination.Create -> return
     }
-    navigate(route) {
+    navigate(graphRoute) {
         popUpTo(graph.findStartDestination().id) {
             inclusive = false
             saveState = true
         }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+/**
+ * Returns the already-active tab to its own root screen.
+ *
+ * Kept separate from [switchTab] because the two answer different questions:
+ * switching tabs should restore where the user left off, while re-tapping the
+ * current tab should unwind to the top of it.
+ */
+private fun NavHostController.popToTabRoot(destination: TopLevelDestination) {
+    when (destination) {
+        TopLevelDestination.Home -> popBackStack(HomeRoute, inclusive = false)
+        TopLevelDestination.Search -> popBackStack(SearchRoute, inclusive = false)
+        TopLevelDestination.Library -> popBackStack(LibraryRoute, inclusive = false)
+        TopLevelDestination.Create -> Unit
+    }
+}
+
+/**
+ * The collection detail destination, registered once per tab graph.
+ *
+ * Declared as an extension rather than copied three times so the push and pop
+ * transitions cannot drift apart between tabs.
+ */
+private fun NavGraphBuilder.collectionDestination(
+    navController: NavHostController,
+    screenPadding: PaddingValues,
+) {
+    // Detail is a push, so it slides in from the trailing edge and slides back out
+    // the same way. The direction is what tells the user which way back is.
+    composable<CollectionRoute>(
+        enterTransition = {
+            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { it }
+        },
+        // The outgoing screen drifts a fraction of the way left instead of fading.
+        // That parallax is what makes the detail read as sitting on top of the tab
+        // rather than replacing it, and it costs no legibility.
+        exitTransition = {
+            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+        },
+        popEnterTransition = {
+            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+        },
+        // Slide only, no fade. Fading while sliding makes the screen go translucent
+        // mid-motion, so for a moment both screens are visible through each other,
+        // and that smear is the ugly part of the close.
+        popExitTransition = {
+            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Accelerate)) { it }
+        },
+    ) { entry ->
+        val route = entry.toRoute<CollectionRoute>()
+        CollectionScreen(
+            collectionId = route.id,
+            onBack = navController::popBackStack,
+            contentPadding = screenPadding,
+        )
     }
 }

@@ -1,7 +1,13 @@
 package com.spotkofi.app.player
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
+import androidx.core.content.ContextCompat
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.Player
+import androidx.media3.datasource.DataSource
+import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.RepeatMode
 import com.spotkofi.app.data.model.Track
@@ -19,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Coordinates queue state, stream resolution, and the Media3-backed player.
@@ -30,7 +37,9 @@ import kotlinx.coroutines.withContext
 class MusicPlayerController(
     context: Context,
     private val musicService: MusicService,
-) : PlayerController {
+    private val localStore: LocalMusicStore,
+    dataSourceFactory: DataSource.Factory? = null,
+) : PlayerController, QueueController {
 
     /**
      * Constructed here rather than injected: the resolver's type is internal to
@@ -39,8 +48,55 @@ class MusicPlayerController(
      */
     private val trackResolver = YouTubeTrackResolver()
 
+    private val appContext = context.applicationContext
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val audioPlayer = AudioPlayer(context)
+    private val audioPlayer = AudioPlayer(context, dataSourceFactory)
+
+    /**
+     * The player handed to the platform [MediaSession].
+     *
+     * The decoder only ever holds the one current item, so Media3 would report no
+     * next/previous item and the system controls would grey those buttons out.
+     * This wrapper advertises them and routes them into the app's own queue, so
+     * the notification, lock screen and dynamic island drive the same queue the
+     * in-app player uses.
+     */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    val mediaSessionPlayer: Player by lazy {
+        @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+        object : ForwardingPlayer(audioPlayer.mediaPlayer) {
+            override fun getAvailableCommands(): Player.Commands =
+                super.getAvailableCommands()
+                    .buildUpon()
+                    .add(Player.COMMAND_SEEK_TO_NEXT)
+                    .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                    .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                    .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                    .build()
+
+            override fun isCommandAvailable(command: Int): Boolean = when (command) {
+                Player.COMMAND_SEEK_TO_NEXT,
+                Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                Player.COMMAND_SEEK_TO_PREVIOUS,
+                Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                -> true
+
+                else -> super.isCommandAvailable(command)
+            }
+
+            override fun hasNextMediaItem(): Boolean = _queue.value.size > 1
+
+            override fun hasPreviousMediaItem(): Boolean = _queue.value.size > 1
+
+            override fun seekToNext() = next()
+
+            override fun seekToNextMediaItem() = next()
+
+            override fun seekToPrevious() = previous()
+
+            override fun seekToPreviousMediaItem() = previous()
+        }
+    }
     private var activePlaybackJob: Job? = null
     private var playbackGeneration = 0L
     private var currentTrackIndex = 0
@@ -64,12 +120,39 @@ class MusicPlayerController(
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
     private val _queue = MutableStateFlow<List<Track>>(emptyList())
-    val queue: StateFlow<List<Track>> = _queue.asStateFlow()
+    override val queue: StateFlow<List<Track>> = _queue.asStateFlow()
+
+    /** Restores the last queue before accepting a user mutation. */
+    private val restoreJob = coroutineScope.launch {
+        val restored = localStore.loadQueue()
+        if (!released && _queue.value.isEmpty() && restored.isNotEmpty()) {
+            _queue.value = restored
+        }
+    }
 
     init {
         audioPlayer.setOnPlaybackStateChanged { isPlaying ->
             if (!released) {
                 _state.update { it.copy(isPlaying = isPlaying) }
+                // Started only once audio is genuinely playing. Starting it at
+                // resolve time would leave a foreground service with nothing to
+                // show while the stream URL is still being fetched.
+                if (isPlaying) ensurePlaybackService()
+            }
+        }
+
+        // Saved state is observed rather than snapshotted. It used to be copied
+        // into PlaybackState when a track started and then only flipped by
+        // toggleSaved, so saving the playing song from any list screen left the
+        // player and the mini player showing the opposite of the truth.
+        coroutineScope.launch {
+            localStore.savedTracks.collect { saved ->
+                if (released) return@collect
+                _state.update { current ->
+                    val trackId = current.track?.id
+                    val isSaved = trackId != null && saved.any { it.id == trackId }
+                    if (current.isSaved == isSaved) current else current.copy(isSaved = isSaved)
+                }
             }
         }
 
@@ -101,6 +184,7 @@ class MusicPlayerController(
     override fun play(track: Track, queue: List<Track>) {
         coroutineScope.launch {
             if (released) return@launch
+            restoreJob.join()
 
             val requestedQueue = queue.ifEmpty { listOf(track) }
             val normalizedQueue = if (requestedQueue.any { it.id == track.id }) {
@@ -112,9 +196,81 @@ class MusicPlayerController(
             currentTrackIndex = normalizedQueue.indexOfFirst { it.id == track.id }
                 .coerceAtLeast(0)
             playbackIntent = true
+            persistQueue()
             // Only an explicit selection counts as intent to see the player.
             playRequestId++
             requestPlayback(track)
+        }
+    }
+
+    override fun addToQueue(track: Track) {
+        coroutineScope.launch {
+            if (released) return@launch
+            restoreJob.join()
+            _queue.update { it + track }
+            persistQueue()
+        }
+    }
+
+    override fun playNext(track: Track) {
+        coroutineScope.launch {
+            if (released) return@launch
+            restoreJob.join()
+            _queue.update { current ->
+                val insertionIndex = (currentTrackIndex + 1).coerceIn(0, current.size)
+                current.toMutableList().apply { add(insertionIndex, track) }
+            }
+            persistQueue()
+        }
+    }
+
+    override fun removeFromQueue(trackId: String) {
+        coroutineScope.launch {
+            if (released) return@launch
+            restoreJob.join()
+            val current = _queue.value
+            val removedIndex = current.indexOfFirst { it.id == trackId }
+            if (removedIndex < 0) return@launch
+            val next = current.toMutableList().apply { removeAt(removedIndex) }
+            if (removedIndex < currentTrackIndex) currentTrackIndex--
+            _queue.value = next
+            if (next.isEmpty()) {
+                stopInternal()
+            } else {
+                currentTrackIndex = currentTrackIndex.coerceIn(0, next.lastIndex)
+            }
+            persistQueue()
+        }
+    }
+
+    override fun moveInQueue(from: Int, to: Int) {
+        coroutineScope.launch {
+            if (released) return@launch
+            restoreJob.join()
+            val current = _queue.value
+            if (from !in current.indices || to !in current.indices || from == to) return@launch
+            val mutable = current.toMutableList()
+            val moved = mutable.removeAt(from)
+            mutable.add(to, moved)
+            currentTrackIndex = when {
+                currentTrackIndex == from -> to
+                from < currentTrackIndex && to >= currentTrackIndex -> currentTrackIndex - 1
+                from > currentTrackIndex && to <= currentTrackIndex -> currentTrackIndex + 1
+                else -> currentTrackIndex
+            }
+            _queue.value = mutable
+            persistQueue()
+        }
+    }
+
+    override fun clearQueue() {
+        coroutineScope.launch {
+            if (released) return@launch
+            restoreJob.join()
+            val current = _state.value.track
+            _queue.value = current?.let(::listOf).orEmpty()
+            currentTrackIndex = 0
+            persistQueue()
         }
     }
 
@@ -215,6 +371,7 @@ class MusicPlayerController(
             }
 
             _state.update { it.copy(isShuffled = newShuffled) }
+            persistQueue()
         }
     }
 
@@ -232,7 +389,15 @@ class MusicPlayerController(
 
     override fun toggleSaved() {
         coroutineScope.launch {
-            if (!released) _state.update { it.copy(isSaved = !it.isSaved) }
+            if (released) return@launch
+            val track = _state.value.track ?: return@launch
+            // Writes only to the store. The savedTracks collector above is what
+            // updates the flag, so every surface reads one source of truth.
+            if (localStore.isTrackSaved(track.id)) {
+                localStore.removeTrack(track.id)
+            } else {
+                localStore.saveTrack(track)
+            }
         }
     }
 
@@ -270,9 +435,11 @@ class MusicPlayerController(
                 positionMs = 0L,
                 error = null,
                 streamDurationMs = track.durationMs.takeIf { duration -> duration > 0L },
+                isSaved = localStore.isTrackSaved(track.id),
                 playRequestId = playRequestId,
             )
         }
+        localStore.recordPlayed(track)
 
         activePlaybackJob = coroutineScope.launch {
             val resolved = try {
@@ -309,8 +476,20 @@ class MusicPlayerController(
             resolved.videoId?.let { videoId ->
                 currentVideoId = videoId
                 cacheStreamUrl(videoId, resolved.url)
+            } ?: run {
+                // A file URI is already the durable offline source; it has no
+                // remote video identity and must not inherit one from the track.
+                currentVideoId = null
             }
-            audioPlayer.play(resolved.url, autoPlay = playbackIntent)
+            audioPlayer.play(
+                resolved.url,
+                autoPlay = playbackIntent,
+                cacheKey = resolved.videoId,
+                title = track.title,
+                artist = track.artistName,
+                album = track.albumTitle,
+                artworkUrl = track.artworkUrl,
+            )
         }
     }
 
@@ -322,6 +501,17 @@ class MusicPlayerController(
      * clip silently instead of the song is the bug this replaced.
      */
     private suspend fun resolveStream(track: Track): ResolvedStream? {
+        val downloadedFile = localStore.downloadedFile(track.id)
+        if (downloadedFile != null) {
+            // A local file must not reuse the remote video's cache key. The
+            // playback cache is keyed by resolved remote streams, while this
+            // URI already points at the user's durable offline bytes.
+            return ResolvedStream(
+                videoId = null,
+                url = Uri.fromFile(File(downloadedFile)).toString(),
+            )
+        }
+
         val videoId = withContext(Dispatchers.IO) { trackResolver.resolveVideoId(track) }
 
         if (videoId != null) {
@@ -387,6 +577,7 @@ class MusicPlayerController(
         audioPlayer.stop()
         _queue.value = emptyList()
         currentTrackIndex = 0
+        persistQueue()
         _state.update {
             it.copy(
                 track = null,
@@ -395,6 +586,25 @@ class MusicPlayerController(
                 streamDurationMs = null,
                 error = null,
             )
+        }
+    }
+
+    private fun persistQueue() {
+        coroutineScope.launch {
+            if (!released) localStore.saveQueue(_queue.value)
+        }
+    }
+
+    /**
+     * Promotes the process to a foreground service for the duration of playback.
+     *
+     * Without it, audio is only as durable as the visible activity: minimising the
+     * app makes the process a background candidate and the system is free to kill
+     * it mid-song.
+     */
+    private fun ensurePlaybackService() {
+        runCatching {
+            ContextCompat.startForegroundService(appContext, PlaybackService.intent(appContext))
         }
     }
 

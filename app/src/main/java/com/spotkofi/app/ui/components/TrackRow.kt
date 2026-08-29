@@ -24,6 +24,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.spotkofi.app.R
 import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.data.service.DownloadManagerStatus
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 /**
@@ -42,6 +43,10 @@ fun TrackRow(
     isPlaying: Boolean = false,
     showArtwork: Boolean = true,
     trailingText: String? = null,
+    /** Offline state for this track, or null when it was never downloaded. */
+    downloadStatus: DownloadManagerStatus? = null,
+    /** Percent transferred, printed while a download is running or paused. */
+    downloadProgress: Int = 0,
     onMoreClick: (() -> Unit)? = null,
 ) {
     val colors = SpotKofiTheme.colors
@@ -87,6 +92,11 @@ fun TrackRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+
+        if (downloadStatus != null) {
+            Spacer(Modifier.width(dimens.spaceSm))
+            DownloadIndicator(status = downloadStatus, progress = downloadProgress)
         }
 
         if (trailingText != null) {
@@ -143,6 +153,8 @@ private fun TrackRowPreview() {
                 onClick = {},
                 isPlaying = true,
                 trailingText = "4:05",
+                downloadStatus = DownloadManagerStatus.DOWNLOADING,
+                downloadProgress = 42,
                 onMoreClick = {},
             )
         }

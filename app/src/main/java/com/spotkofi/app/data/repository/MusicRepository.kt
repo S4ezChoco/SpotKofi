@@ -39,8 +39,8 @@ interface MusicRepository {
     /**
      * What the user has opened, most recent first.
      *
-     * Recorded locally via [recordVisited]. This is real usage data rather than a
-     * saved-items list, because saving requires an account.
+     * Local saved songs are handled by [com.spotkofi.app.data.local.LocalMusicStore];
+     * this repository flow remains the durable recent-collections view.
      */
     fun library(): Flow<List<MediaCollection>>
 

@@ -1,6 +1,7 @@
 package com.spotkofi.app.feature.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,13 +17,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -38,17 +43,17 @@ import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.data.repository.previewHomeSections
 import com.spotkofi.app.data.repository.previewQuickPicks
-import com.spotkofi.app.data.repository.previewReleaseSections
+import com.spotkofi.app.data.service.DownloadItem
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.QuickPickCard
 import com.spotkofi.app.ui.components.ReleaseCard
 import com.spotkofi.app.ui.components.SectionHeader
-import com.spotkofi.app.ui.components.SegmentedChipPair
 import com.spotkofi.app.ui.components.SpotKofiChip
 import com.spotkofi.app.ui.components.SpotlightCard
 import com.spotkofi.app.ui.components.StationCard
+import com.spotkofi.app.ui.components.TrackActionsSheet
 import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.layout.ResponsiveLayout
@@ -56,6 +61,7 @@ import com.spotkofi.app.ui.layout.rememberResponsiveLayout
 import com.spotkofi.app.ui.motion.staggeredEntry
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import com.spotkofi.app.ui.theme.headerWash
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
@@ -66,22 +72,66 @@ fun HomeScreen(
 ) {
     val container = LocalAppContainer.current
     val viewModel: HomeViewModel = viewModel {
-        HomeViewModel(container.musicRepository, container.playerController)
+        HomeViewModel(
+            container.musicRepository,
+            container.playerController,
+            container.localStore,
+        )
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val savedTracks by container.localStore.savedTracks.collectAsStateWithLifecycle()
+    val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
+    val playlists by container.localStore.playlists.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var selectedTrack by remember { mutableStateOf<Track?>(null) }
 
-    HomeContent(
-        state = state,
-        onChipClick = viewModel::onChipClick,
-        onCollectionClick = onCollectionClick,
-        onTrackClick = viewModel::onPlayTrack,
-        playingTrackId = playback.track?.id,
-        onOpenProfile = onOpenProfile,
-        onRetry = viewModel::retry,
-        contentPadding = contentPadding,
-        modifier = modifier,
-    )
+    // Indexed once per change instead of scanned per row, so a long shelf does not
+    // do a linear search for every visible track.
+    val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
+
+    androidx.compose.foundation.layout.Box(modifier = modifier.fillMaxSize()) {
+        HomeContent(
+            state = state,
+            onChipClick = viewModel::onChipClick,
+            onCollectionClick = onCollectionClick,
+            onTrackClick = viewModel::onPlayTrack,
+            onTrackMore = { selectedTrack = it },
+            playingTrackId = playback.track?.id,
+            onOpenProfile = onOpenProfile,
+            onRetry = viewModel::retry,
+            contentPadding = contentPadding,
+            downloads = downloadsByTrack,
+        )
+
+        val track = selectedTrack
+        TrackActionsSheet(
+            visible = track != null,
+            track = track,
+            isSaved = track?.let { candidate -> savedTracks.any { it.id == candidate.id } } == true,
+            playlists = playlists,
+            downloadStatus = track?.let { downloadsByTrack[it.id]?.status },
+            downloadProgress = track?.let { downloadsByTrack[it.id]?.progress } ?: 0,
+            onDismiss = { selectedTrack = null },
+            onToggleSaved = {
+                track?.let { candidate ->
+                    if (savedTracks.any { it.id == candidate.id }) {
+                        container.localStore.removeTrack(candidate.id)
+                    } else {
+                        container.localStore.saveTrack(candidate)
+                    }
+                }
+            },
+            onPlayNext = { track?.let(container.queueController::playNext) },
+            onAddToQueue = { track?.let(container.queueController::addToQueue) },
+            onDownload = { track?.let(container.downloadManager::toggleDownload) },
+            onAddToPlaylist = { playlist ->
+                track?.let { candidate ->
+                    scope.launch { container.localStore.addToPlaylist(playlist.id, candidate) }
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -90,11 +140,13 @@ private fun HomeContent(
     onChipClick: (HomeTab) -> Unit,
     onCollectionClick: (String) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onTrackMore: (Track) -> Unit = {},
     playingTrackId: String?,
     onOpenProfile: () -> Unit,
     onRetry: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
+    downloads: Map<String, DownloadItem> = emptyMap(),
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -180,6 +232,33 @@ private fun HomeContent(
                 return@LazyColumn
             }
 
+            // A filter that legitimately has nothing behind it says so, rather than
+            // leaving the user staring at a blank screen wondering if it is loading.
+            if (state.isEmpty) {
+                item(key = "empty") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = layout.gutter, vertical = dimens.spaceHuge),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = "Nothing here yet",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = colors.textPrimary,
+                        )
+                        Spacer(Modifier.height(dimens.spaceXs))
+                        Text(
+                            text = "The ${state.selectedChip.label} feed has no content " +
+                                "from the catalog right now.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textSecondary,
+                        )
+                    }
+                }
+                return@LazyColumn
+            }
+
             if (state.showQuickPicks) {
                 // Grid built from chunked rows: a LazyVerticalGrid cannot nest in a
                 // LazyColumn, and chunking keeps the screen one scroll container.
@@ -231,7 +310,9 @@ private fun HomeContent(
                             layout = layout,
                             onCollectionClick = onCollectionClick,
                             onTrackClick = onTrackClick,
+                            onTrackMore = onTrackMore,
                             playingTrackId = playingTrackId,
+                            downloads = downloads,
                         )
                         Spacer(Modifier.height(dimens.shelfSpacing))
                     }
@@ -260,35 +341,24 @@ private fun HomeHeader(
         ProfileAvatar(name = state.userName, onClick = onOpenProfile, size = 32.dp)
         Spacer(Modifier.width(dimens.spaceMd))
 
-        // Built explicitly rather than from a list, because Music and Following
-        // are one segmented control, not two independent chips.
-        LazyRow(
+        // One chip per feed, driven by the enum.
+        //
+        // This used to be a hand-written list with Music and Following fused into a
+        // segmented control. Following had no working feed behind it - every card it
+        // drew ignored taps - so the control is gone and the row is a plain,
+        // uniform set of filters again.
+        Row(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(end = gutter),
             horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-            contentPadding = PaddingValues(end = gutter),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            item(key = "all") {
+            HomeTab.entries.forEach { tab ->
                 SpotKofiChip(
-                    label = HomeTab.All.label,
-                    selected = state.selectedChip == HomeTab.All,
-                    onClick = { onChipClick(HomeTab.All) },
-                )
-            }
-            item(key = "music_following") {
-                SegmentedChipPair(
-                    leadingLabel = HomeTab.Music.label,
-                    trailingLabel = HomeTab.Following.label,
-                    leadingSelected = state.selectedChip == HomeTab.Music,
-                    trailingSelected = state.followingActive,
-                    trailingVisible = state.followingVisible,
-                    onLeadingClick = { onChipClick(HomeTab.Music) },
-                    onTrailingClick = { onChipClick(HomeTab.Following) },
-                )
-            }
-            item(key = "podcasts") {
-                SpotKofiChip(
-                    label = HomeTab.Podcasts.label,
-                    selected = state.selectedChip == HomeTab.Podcasts,
-                    onClick = { onChipClick(HomeTab.Podcasts) },
+                    label = tab.label,
+                    selected = state.selectedChip == tab,
+                    onClick = { onChipClick(tab) },
                 )
             }
         }
@@ -307,7 +377,9 @@ private fun HomeSectionBlock(
     layout: ResponsiveLayout,
     onCollectionClick: (String) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
+    onTrackMore: (Track) -> Unit,
     playingTrackId: String?,
+    downloads: Map<String, DownloadItem>,
 ) {
     val dimens = SpotKofiTheme.dimens
 
@@ -335,6 +407,7 @@ private fun HomeSectionBlock(
             // user this is playable rather than another screen to open.
             section.items.forEachIndexed { index, track ->
                 Box(modifier = Modifier.staggeredEntry(index)) {
+                    val download = downloads[track.id]
                     TrackRow(
                         track = track,
                         onClick = { onTrackClick(track, section.items) },
@@ -342,6 +415,9 @@ private fun HomeSectionBlock(
                         trailingText = track.durationMs
                             .takeIf { it > 0L }
                             ?.asTrackDuration(),
+                        downloadStatus = download?.status,
+                        downloadProgress = download?.progress ?: 0,
+                        onMoreClick = { onTrackMore(track) },
                     )
                 }
             }
@@ -429,16 +505,14 @@ private fun HomePreview() {
     }
 }
 
-@Preview(name = "Home / Following", backgroundColor = 0xFF121212, showBackground = true, heightDp = 1000)
+@Preview(name = "Home / Empty", backgroundColor = 0xFF121212, showBackground = true, heightDp = 600)
 @Composable
-private fun HomeFollowingPreview() {
+private fun HomeEmptyPreview() {
     SpotKofiTheme {
         HomeContent(
             state = HomeViewModel.UiState(
                 userName = "kofi_listener",
-                selectedChip = HomeTab.Music,
-                followingActive = true,
-                sections = previewReleaseSections(),
+                selectedChip = HomeTab.Podcasts,
                 isLoading = false,
             ),
             onChipClick = {},

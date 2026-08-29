@@ -40,6 +40,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,11 +54,19 @@ import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
 import com.spotkofi.app.data.model.MediaCollection
+import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.data.model.asTrackDuration
+import com.spotkofi.app.data.service.DownloadManagerStatus
+import com.spotkofi.app.data.service.DownloadItem
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.ProfileAvatar
+import com.spotkofi.app.ui.components.TrackActionsSheet
+import com.spotkofi.app.ui.components.TrackRow
+import kotlinx.coroutines.launch
 
 private enum class LibraryFilter(val label: String) {
     Playlists("Playlists"),
+    Tracks("Songs"),
     Albums("Albums"),
     Artists("Artists"),
     Downloaded("Downloaded"),
@@ -66,37 +75,64 @@ private enum class LibraryFilter(val label: String) {
 @Composable
 fun LibraryScreen(
     onCollectionClick: (String) -> Unit,
+    onTrackClick: (Track, List<Track>) -> Unit,
     onOpenProfile: () -> Unit,
     onSearchClick: () -> Unit,
     onCreate: () -> Unit,
     contentPadding: PaddingValues,
 ) {
-    val repository = LocalAppContainer.current.musicRepository
+    val container = LocalAppContainer.current
+    val repository = container.musicRepository
+    val store = container.localStore
     val userName = remember { repository.currentUserName() }
     val visited by repository.library().collectAsStateWithLifecycle(initialValue = emptyList())
+    val savedCollections by store.savedCollections.collectAsStateWithLifecycle()
+    val playlists by store.playlists.collectAsStateWithLifecycle()
+    val savedTracks by store.savedTracks.collectAsStateWithLifecycle()
+    val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
     var selectedFilter by remember { mutableStateOf<LibraryFilter?>(null) }
     var gridLayout by remember { mutableStateOf(false) }
+    var selectedTrack by remember { mutableStateOf<Track?>(null) }
+    val scope = rememberCoroutineScope()
 
-    val visibleItems = remember(visited, selectedFilter) {
-        when (selectedFilter) {
-            null -> visited
-            LibraryFilter.Playlists -> visited.filter { it is com.spotkofi.app.data.model.Playlist }
-            LibraryFilter.Albums -> visited.filterIsInstance<Album>()
-            LibraryFilter.Artists -> visited.filterIsInstance<Artist>()
-            // Downloads are not persisted yet; keep the filter honest instead of
-            // displaying the same recent items under a false label.
-            LibraryFilter.Downloaded -> emptyList()
-        }
+    val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
+
+    val downloadedTracks = remember(downloads) {
+        downloads
+            .filter { item ->
+                item.status == DownloadManagerStatus.COMPLETED &&
+                    item.filePath?.let { path -> java.io.File(path).isFile } == true
+            }
+            .map { it.track }
+    }
+    val collectionItems = remember(visited, savedCollections, playlists, selectedFilter) {
+        (playlists + savedCollections + visited)
+            .distinctBy { it.id }
+            .let { all ->
+                when (selectedFilter) {
+                    LibraryFilter.Playlists -> all.filter { it is com.spotkofi.app.data.model.Playlist }
+                    LibraryFilter.Albums -> all.filterIsInstance<Album>()
+                    LibraryFilter.Artists -> all.filterIsInstance<Artist>()
+                    LibraryFilter.Tracks, LibraryFilter.Downloaded -> emptyList()
+                    null -> all
+                }
+            }
+    }
+    val trackItems = when (selectedFilter) {
+        LibraryFilter.Downloaded -> downloadedTracks
+        LibraryFilter.Tracks, null -> savedTracks
+        else -> emptyList()
     }
 
     CompositionLocalProvider(
         LocalContentColor provides MaterialTheme.colorScheme.onBackground,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding),
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(contentPadding),
+            ) {
         LibraryHeader(
             userName = userName,
             onOpenProfile = onOpenProfile,
@@ -132,7 +168,7 @@ fun LibraryScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Recents",
+                text = if (selectedFilter == null) "Your library" else selectedFilter!!.label,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
@@ -145,7 +181,37 @@ fun LibraryScreen(
             }
         }
 
-        if (visibleItems.isEmpty()) {
+        if (trackItems.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+            ) {
+                Text(
+                    text = if (selectedFilter == LibraryFilter.Downloaded) {
+                        "Offline songs"
+                    } else {
+                        "Saved songs"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+                trackItems.take(20).forEach { track ->
+                    val download = downloadsByTrack[track.id]
+                    TrackRow(
+                        track = track,
+                        onClick = { onTrackClick(track, trackItems) },
+                        trailingText = track.durationMs.takeIf { it > 0L }?.asTrackDuration(),
+                        downloadStatus = download?.status,
+                        downloadProgress = download?.progress ?: 0,
+                        onMoreClick = { selectedTrack = track },
+                    )
+                }
+            }
+        }
+
+        if (collectionItems.isEmpty() && trackItems.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -155,13 +221,15 @@ fun LibraryScreen(
             ) {
                 Text(
                     text = if (selectedFilter == null) {
-                        "Open an album or artist to add it to your library."
+                        "Save songs, playlists, albums, or artists to see them here."
                     } else {
                         "Nothing in ${selectedFilter!!.label.lowercase()} yet."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        } else if (collectionItems.isEmpty()) {
+            Spacer(Modifier.weight(1f))
         } else if (gridLayout) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
@@ -170,7 +238,7 @@ fun LibraryScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                items(visibleItems) { collection ->
+                items(collectionItems) { collection ->
                     LibraryGridItem(collection, onCollectionClick)
                 }
             }
@@ -180,13 +248,43 @@ fun LibraryScreen(
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(visibleItems, key = { it.id }) { collection ->
+                items(collectionItems, key = { it.id }) { collection ->
                     LibraryListItem(collection, onCollectionClick)
                 }
             }
         }
+
+            val track = selectedTrack
+            TrackActionsSheet(
+                visible = track != null,
+                track = track,
+                isSaved = track?.let { candidate -> savedTracks.any { it.id == candidate.id } } == true,
+            playlists = playlists,
+            downloadStatus = track?.let { downloadsByTrack[it.id]?.status },
+            downloadProgress = track?.let { downloadsByTrack[it.id]?.progress } ?: 0,
+            onDismiss = { selectedTrack = null },
+                onToggleSaved = {
+                    track?.let { candidate ->
+                        if (savedTracks.any { it.id == candidate.id }) {
+                            store.removeTrack(candidate.id)
+                        } else {
+                            store.saveTrack(candidate)
+                        }
+                    }
+                },
+                onPlayNext = { track?.let(container.queueController::playNext) },
+                onAddToQueue = { track?.let(container.queueController::addToQueue) },
+                onDownload = { track?.let(container.downloadManager::toggleDownload) },
+                onAddToPlaylist = { playlist ->
+                    track?.let { candidate ->
+                        scope.launch { store.addToPlaylist(playlist.id, candidate) }
+                    }
+                },
+            )
+        }
     }
-    }
+}
+
 }
 
 @Composable

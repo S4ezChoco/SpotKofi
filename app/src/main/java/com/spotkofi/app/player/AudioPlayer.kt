@@ -1,12 +1,17 @@
 package com.spotkofi.app.player
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -27,7 +32,11 @@ import kotlinx.coroutines.launch
  * keeps the rest of SpotKofi independent from Media3 while making play, pause,
  * seek, buffering, completion, and release safe to call at any time.
  */
-class AudioPlayer(context: Context) {
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
+class AudioPlayer(
+    context: Context,
+    private val providedDataSourceFactory: DataSource.Factory? = null,
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val player: ExoPlayer
@@ -42,11 +51,19 @@ class AudioPlayer(context: Context) {
     private var onPlaybackCompleted: (() -> Unit)? = null
 
     init {
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(USER_AGENT)
-            .setConnectTimeoutMs(CONNECT_TIMEOUT_MS)
-            .setReadTimeoutMs(READ_TIMEOUT_MS)
-            .setAllowCrossProtocolRedirects(true)
+        val dataSourceFactory = providedDataSourceFactory ?: run {
+            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(USER_AGENT)
+                .setConnectTimeoutMs(CONNECT_TIMEOUT_MS)
+                .setReadTimeoutMs(READ_TIMEOUT_MS)
+                .setAllowCrossProtocolRedirects(true)
+            // DefaultDataSource adds file/content support without changing the
+            // HTTP resolver used for full-length YouTube streams.
+            DefaultDataSource.Factory(
+                context.applicationContext,
+                httpDataSourceFactory,
+            )
+        }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 MIN_BUFFER_MS,
@@ -118,7 +135,22 @@ class AudioPlayer(context: Context) {
      * Loads a stream URL. When [autoPlay] is false the media is prepared but
      * remains paused, which preserves a pause tapped while the resolver is busy.
      */
-    fun play(streamUrl: String, autoPlay: Boolean = true) {
+    fun play(
+        streamUrl: String,
+        autoPlay: Boolean = true,
+        cacheKey: String? = null,
+        /**
+         * Metadata for the platform MediaSession.
+         *
+         * Without it the system media controls, the lock screen and OEM
+         * floating/dynamic island surfaces have nothing to render but the
+         * package name.
+         */
+        title: String? = null,
+        artist: String? = null,
+        album: String? = null,
+        artworkUrl: String? = null,
+    ) {
         if (released || streamUrl.isBlank()) return
 
         completionReported = false
@@ -126,7 +158,27 @@ class AudioPlayer(context: Context) {
         progressJob?.cancel()
         Log.d(TAG, "Preparing buffered audio URL")
 
-        player.setMediaItem(MediaItem.fromUri(streamUrl))
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist)
+            .setAlbumTitle(album)
+            .setArtworkUri(artworkUrl?.takeIf { it.isNotBlank() }?.let(Uri::parse))
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+            .build()
+
+        val mediaItem = MediaItem.Builder()
+            .setUri(streamUrl)
+            .setMediaMetadata(metadata)
+            // File URIs are already offline data. Never let a remote video ID
+            // alias a local file in the streaming cache.
+            .apply {
+                cacheKey
+                    ?.takeUnless { streamUrl.startsWith("file:", ignoreCase = true) }
+                    ?.let(::setCustomCacheKey)
+            }
+            .build()
+        player.setMediaItem(mediaItem)
         player.playWhenReady = autoPlay
         player.prepare()
         if (autoPlay) player.play()
@@ -178,6 +230,16 @@ class AudioPlayer(context: Context) {
         if (shouldPlay) player.play()
         emitProgress()
     }
+
+    /**
+     * The underlying Media3 player, exposed only so a [MediaSession] can be built
+     * over the very same instance the app is already driving.
+     *
+     * Handing the session a second player would give the system controls their own
+     * independent playback state, which is exactly how notification transport ends
+     * up disagreeing with the in-app player.
+     */
+    val mediaPlayer: Player get() = player
 
     fun getCurrentPosition(): Long = if (released) 0L else player.currentPosition.coerceAtLeast(0L)
 

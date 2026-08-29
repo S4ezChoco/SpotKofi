@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
@@ -41,7 +42,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -65,12 +69,15 @@ import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.data.repository.previewCollection
 import com.spotkofi.app.data.repository.previewTracks
+import com.spotkofi.app.data.service.DownloadItem
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.PlayButton
+import com.spotkofi.app.ui.components.TrackActionsSheet
 import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.theme.SpotKofiTheme
+import kotlinx.coroutines.launch
 
 @Composable
 fun CollectionScreen(
@@ -89,26 +96,76 @@ fun CollectionScreen(
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val savedTracks by container.localStore.savedTracks.collectAsStateWithLifecycle()
+    val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
+    val savedCollections by container.localStore.savedCollections.collectAsStateWithLifecycle()
+    val playlists by container.localStore.playlists.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var selectedTrack by remember { mutableStateOf<Track?>(null) }
+    val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
 
-    CollectionContent(
-        state = state,
-        playback = playback,
-        onBack = onBack,
-        onPlayAll = viewModel::onPlayAll,
-        onTrackClick = viewModel::onTrackClick,
-        onRetry = viewModel::retry,
-        contentPadding = contentPadding,
-        modifier = modifier,
-    )
+    Box(modifier = modifier.fillMaxSize()) {
+        CollectionContent(
+            state = state,
+            downloads = downloadsByTrack,
+            playback = playback,
+            onBack = onBack,
+            onPlayAll = viewModel::onPlayAll,
+            onTrackClick = viewModel::onTrackClick,
+            onTrackMore = { selectedTrack = it },
+            isCollectionSaved = state.collection?.let { collection ->
+                savedCollections.any { it.id == collection.id }
+            } == true,
+            onToggleCollectionSave = {
+                state.collection?.let(container.localStore::toggleCollection)
+            },
+            onDownloadAll = { container.downloadManager.downloadTracks(state.tracks) },
+            onRetry = viewModel::retry,
+            contentPadding = contentPadding,
+        )
+
+        val track = selectedTrack
+        TrackActionsSheet(
+            visible = track != null,
+            track = track,
+            isSaved = track?.let { candidate -> savedTracks.any { it.id == candidate.id } } == true,
+            playlists = playlists,
+            downloadStatus = track?.let { downloadsByTrack[it.id]?.status },
+            downloadProgress = track?.let { downloadsByTrack[it.id]?.progress } ?: 0,
+            onDismiss = { selectedTrack = null },
+            onToggleSaved = {
+                track?.let { candidate ->
+                    if (savedTracks.any { it.id == candidate.id }) {
+                        container.localStore.removeTrack(candidate.id)
+                    } else {
+                        container.localStore.saveTrack(candidate)
+                    }
+                }
+            },
+            onPlayNext = { track?.let(container.queueController::playNext) },
+            onAddToQueue = { track?.let(container.queueController::addToQueue) },
+            onDownload = { track?.let(container.downloadManager::toggleDownload) },
+            onAddToPlaylist = { playlist ->
+                track?.let { candidate ->
+                    scope.launch { container.localStore.addToPlaylist(playlist.id, candidate) }
+                }
+            },
+        )
+    }
 }
 
 @Composable
 private fun CollectionContent(
     state: CollectionViewModel.UiState,
+    downloads: Map<String, DownloadItem>,
     playback: PlaybackState,
     onBack: () -> Unit,
     onPlayAll: () -> Unit,
     onTrackClick: (Track) -> Unit,
+    onTrackMore: (Track) -> Unit = {},
+    isCollectionSaved: Boolean = false,
+    onToggleCollectionSave: () -> Unit = {},
+    onDownloadAll: () -> Unit = {},
     onRetry: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
@@ -209,7 +266,11 @@ private fun CollectionContent(
 
                     Spacer(Modifier.height(dimens.spaceMd))
 
-                    OwnerRow(collection = collection)
+                    OwnerRow(
+                        collection = collection,
+                        isSaved = isCollectionSaved,
+                        onToggleSave = onToggleCollectionSave,
+                    )
 
                     Spacer(Modifier.height(dimens.spaceSm))
 
@@ -223,6 +284,7 @@ private fun CollectionContent(
                         isPlaying = playback.isPlaying &&
                             playback.track?.id in state.tracks.map { it.id },
                         onPlayAll = onPlayAll,
+                        onDownloadAll = onDownloadAll,
                     )
 
                     Spacer(Modifier.height(dimens.spaceMd))
@@ -234,11 +296,14 @@ private fun CollectionContent(
             }
 
             items(items = state.tracks, key = { it.id }) { track ->
+                val download = downloads[track.id]
                 TrackRow(
                     track = track,
                     onClick = { onTrackClick(track) },
                     isPlaying = playback.track?.id == track.id,
-                    onMoreClick = { /* Phase 5: track context sheet */ },
+                    downloadStatus = download?.status,
+                    downloadProgress = download?.progress ?: 0,
+                    onMoreClick = { onTrackMore(track) },
                 )
             }
 
@@ -279,7 +344,11 @@ private fun CollectionContent(
 
 /** Add-circle, owner avatar and owner name. */
 @Composable
-private fun OwnerRow(collection: MediaCollection) {
+private fun OwnerRow(
+    collection: MediaCollection,
+    isSaved: Boolean,
+    onToggleSave: () -> Unit,
+) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
     val owner = collection.ownerName()
@@ -289,12 +358,12 @@ private fun OwnerRow(collection: MediaCollection) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Filled.AddCircleOutline,
+            imageVector = if (isSaved) Icons.Filled.Check else Icons.Filled.AddCircleOutline,
             contentDescription = stringResource(R.string.cd_add_to_library),
-            tint = colors.textSecondary,
+            tint = if (isSaved) colors.accent else colors.textSecondary,
             modifier = Modifier
                 .size(24.dp)
-                .clickable { /* Phase 5: save collection */ },
+                .clickable(onClick = onToggleSave),
         )
         Spacer(Modifier.width(dimens.spaceSm))
         Artwork(id = owner, size = 22.dp, shape = CircleShape)
@@ -344,6 +413,7 @@ private fun ActionRow(
     artworkUrl: String?,
     isPlaying: Boolean,
     onPlayAll: () -> Unit,
+    onDownloadAll: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -364,7 +434,7 @@ private fun ActionRow(
             tint = colors.textSecondary,
             modifier = Modifier
                 .size(26.dp)
-                .clickable { /* Phase 5: offline download */ },
+                .clickable(onClick = onDownloadAll),
         )
 
         Spacer(Modifier.width(dimens.spaceLg))
@@ -500,6 +570,7 @@ private fun CollectionPreview() {
                 tracks = previewTracks(),
                 isLoading = false,
             ),
+            downloads = emptyMap(),
             playback = PlaybackState(),
             onBack = {},
             onPlayAll = {},

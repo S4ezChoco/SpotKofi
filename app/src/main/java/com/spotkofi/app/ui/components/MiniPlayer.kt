@@ -3,6 +3,10 @@ package com.spotkofi.app.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
@@ -25,11 +27,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -41,12 +46,25 @@ import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
+/** Downward fling speed, px/s, that closes the player outright. */
+private const val CLOSE_VELOCITY_PX = 700f
+
+/** Drag distance, px, past which a release closes the player. */
+private const val CLOSE_DISTANCE_PX = 48f
+
+/** Upward drag distance, px, that expands into the full player. */
+private const val EXPAND_DISTANCE_PX = 36f
+
 /**
  * Collapsed player docked above the bottom navigation.
  *
- * The card is tinted from the artwork rather than using a fixed grey. That is
- * the single most recognisable thing about it, and it is why the mini player
- * reads as "attached" to the track instead of as part of the chrome.
+ * The card is tinted from the artwork rather than using a fixed grey. That is the
+ * single most recognisable thing about it, and it is why the mini player reads as
+ * "attached" to the track instead of as part of the chrome.
+ *
+ * It is a gesture surface, not just a button: dragging up expands the full
+ * player, dragging down closes playback entirely. That mirrors the full player,
+ * where the same downward gesture dismisses.
  *
  * Renders nothing when no track is loaded, so callers can place it
  * unconditionally without a wrapping `if`.
@@ -56,17 +74,24 @@ fun MiniPlayer(
     state: PlaybackState,
     onClick: () -> Unit,
     onTogglePlayPause: () -> Unit,
-    onAddToLibrary: () -> Unit,
-    onConnectDevice: () -> Unit,
+    onToggleSaved: () -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val track = state.track ?: return
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
-    // Pushed well towards black so white text clears contrast on every seed.
+    // Pushed well towards black so white text clears contrast on every seed, then
+    // used as a gradient so the card has some depth instead of reading as a slab.
     val tint = remember(track.id) {
-        lerp(artworkSeedColor(track.id), Color.Black, 0.52f)
+        lerp(artworkSeedColor(track.id), Color.Black, 0.55f)
+    }
+    val cardBrush = remember(tint) {
+        Brush.horizontalGradient(
+            0f to lerp(tint, Color.White, 0.06f),
+            1f to tint,
+        )
     }
 
     // Smoothing the 500ms ticker into a continuous sweep; without this the bar
@@ -76,12 +101,36 @@ fun MiniPlayer(
         label = "miniPlayerProgress",
     )
 
+    // Drag offset is kept out of composition and read only in the draw phase, so
+    // following the finger does not recompose the card on every frame.
+    val dragPx = remember { mutableFloatStateOf(0f) }
+    val dragState = rememberDraggableState { delta ->
+        dragPx.floatValue = (dragPx.floatValue + delta).coerceIn(-EXPAND_DISTANCE_PX * 2f, 240f)
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = dimens.spaceSm)
+            .graphicsLayer {
+                // Only the downward half is followed. Dragging up should feel like
+                // a trigger for the full player, not like lifting the card.
+                translationY = dragPx.floatValue.coerceAtLeast(0f) * 0.6f
+            }
             .clip(SpotKofiTheme.shapes.miniPlayer)
-            .background(tint)
+            .background(cardBrush)
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Vertical,
+                onDragStopped = { velocity ->
+                    val offset = dragPx.floatValue
+                    dragPx.floatValue = 0f
+                    when {
+                        offset > CLOSE_DISTANCE_PX || velocity > CLOSE_VELOCITY_PX -> onClose()
+                        offset < -EXPAND_DISTANCE_PX || velocity < -CLOSE_VELOCITY_PX -> onClick()
+                    }
+                },
+            )
             .clickable(onClick = onClick),
     ) {
         Row(
@@ -104,30 +153,17 @@ fun MiniPlayer(
             Spacer(Modifier.width(dimens.spaceMd))
 
             Column(modifier = Modifier.weight(1f)) {
-                // "Title • Artist" on one line: the bullet form is what the real
-                // app uses at this size, and it buys a second line for the device.
-                Row {
-                    Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = colors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Text(
-                        text = " \u2022 ${track.artistName}",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Normal,
-                        ),
-                        color = colors.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(1.dp))
                 if (state.deviceName != null) {
-                    Spacer(Modifier.height(1.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Filled.VolumeUp,
@@ -144,29 +180,28 @@ fun MiniPlayer(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                } else {
+                    Text(
+                        text = track.artistName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
 
-            IconButton(onClick = onConnectDevice, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = Icons.Filled.Computer,
-                    contentDescription = stringResource(R.string.cd_connect_device),
-                    // Green when a remote device is active, matching the label.
-                    tint = if (state.deviceName != null) colors.accent else colors.textPrimary,
-                    modifier = Modifier.size(dimens.iconSm),
-                )
-            }
+            Spacer(Modifier.width(dimens.spaceSm))
 
-            IconButton(onClick = onAddToLibrary, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = Icons.Filled.AddCircleOutline,
-                    contentDescription = stringResource(R.string.cd_add_to_library),
-                    tint = colors.textPrimary,
-                    modifier = Modifier.size(dimens.iconMd),
-                )
-            }
+            // Same control as the full player, reading the same state, so a save
+            // made in one place is visible in the other.
+            SavedToggle(
+                isSaved = state.isSaved,
+                onToggle = onToggleSaved,
+                size = 28.dp,
+            )
 
-            IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(44.dp)) {
                 Icon(
                     imageVector = if (state.isPlaying) {
                         Icons.Filled.Pause
@@ -177,7 +212,7 @@ fun MiniPlayer(
                         if (state.isPlaying) R.string.cd_pause else R.string.cd_play,
                     ),
                     tint = colors.textPrimary,
-                    modifier = Modifier.size(dimens.iconMd),
+                    modifier = Modifier.size(dimens.iconLg),
                 )
             }
         }
@@ -190,7 +225,7 @@ fun MiniPlayer(
                 .fillMaxWidth()
                 .height(2.dp)
                 .clip(SpotKofiTheme.shapes.chip)
-                .background(Color.White.copy(alpha = 0.22f)),
+                .background(Color.White.copy(alpha = 0.18f)),
         ) {
             Box(
                 modifier = Modifier
@@ -208,23 +243,42 @@ fun MiniPlayer(
 @Composable
 private fun MiniPlayerPreview() {
     SpotKofiTheme {
-        MiniPlayer(
-            state = PlaybackState(
-                track = Track(
-                    id = "tr_05",
-                    title = "Neon Manila",
-                    artistName = "Neon Manila",
-                    albumTitle = "Neon Manila",
-                    durationMs = 201_000,
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            MiniPlayer(
+                state = PlaybackState(
+                    track = Track(
+                        id = "tr_05",
+                        title = "Neon Manila",
+                        artistName = "Neon Manila",
+                        albumTitle = "Neon Manila",
+                        durationMs = 201_000,
+                    ),
+                    isPlaying = true,
+                    positionMs = 74_000,
+                    isSaved = true,
                 ),
-                isPlaying = true,
-                positionMs = 74_000,
-                deviceName = "SpotKofi Web Player",
-            ),
-            onClick = {},
-            onTogglePlayPause = {},
-            onAddToLibrary = {},
-            onConnectDevice = {},
-        )
+                onClick = {},
+                onTogglePlayPause = {},
+                onToggleSaved = {},
+                onClose = {},
+            )
+            MiniPlayer(
+                state = PlaybackState(
+                    track = Track(
+                        id = "tr_06",
+                        title = "EDSA Southbound",
+                        artistName = "Neon Manila",
+                        albumTitle = "Neon Manila",
+                        durationMs = 245_000,
+                    ),
+                    positionMs = 24_000,
+                    deviceName = "SpotKofi Web Player",
+                ),
+                onClick = {},
+                onTogglePlayPause = {},
+                onToggleSaved = {},
+                onClose = {},
+            )
+        }
     }
 }

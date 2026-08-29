@@ -339,7 +339,10 @@ class InMemoryMusicService : MusicService {
     }
     
     override suspend fun getLyrics(trackId: String): String? {
-        return "Sample lyrics for track $trackId\n\nThis is the first verse\nThis is the chorus\nThis is the second verse"
+        // Deliberately null. Lyrics come from a real provider through
+        // MusicRepository.trackDetails; inventing text here would put fabricated
+        // words on screen under a real song's title.
+        return null
     }
     
     override suspend fun getSimilarTracks(trackId: String): List<Track> {

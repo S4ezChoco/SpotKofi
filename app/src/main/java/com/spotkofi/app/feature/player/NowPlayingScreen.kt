@@ -1,7 +1,6 @@
 package com.spotkofi.app.feature.player
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
@@ -94,6 +93,10 @@ import com.spotkofi.app.data.repository.previewTrack
 import com.spotkofi.app.data.repository.previewTrackDetails
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.MediaCard
+import com.spotkofi.app.ui.components.AboutTrackCard
+import com.spotkofi.app.ui.components.LyricsCard
+import com.spotkofi.app.ui.components.QueueSheet
+import com.spotkofi.app.ui.components.SavedToggle
 import com.spotkofi.app.ui.components.TrackOptionsSheet
 import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.motion.clickableScale
@@ -122,10 +125,19 @@ fun NowPlayingScreen(
     }
     val state by viewModel.playbackState.collectAsStateWithLifecycle()
     val details by viewModel.details.collectAsStateWithLifecycle()
+    val queue by container.queueController.queue.collectAsStateWithLifecycle()
+    val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
+    val download = state.track?.let { current ->
+        downloads.firstOrNull { it.track.id == current.id }
+    }
 
     NowPlayingContent(
         state = state,
         details = details,
+        queue = queue,
+        onQueueRemove = container.queueController::removeFromQueue,
+        onQueueMove = container.queueController::moveInQueue,
+        onQueueClear = container.queueController::clearQueue,
         onCollapse = onCollapse,
         onCollectionClick = onCollectionClick,
         onPlayTrack = viewModel::onPlayTrack,
@@ -138,6 +150,9 @@ fun NowPlayingScreen(
         onToggleShuffle = viewModel::onToggleShuffle,
         onCycleRepeat = viewModel::onCycleRepeat,
         onToggleSaved = viewModel::onToggleSaved,
+        onDownload = container.downloadManager::toggleDownload,
+        downloadStatus = download?.status,
+        downloadProgress = download?.progress ?: 0,
         modifier = modifier,
     )
 }
@@ -146,6 +161,10 @@ fun NowPlayingScreen(
 private fun NowPlayingContent(
     state: PlaybackState,
     details: TrackDetails?,
+    queue: List<Track>,
+    onQueueRemove: (String) -> Unit,
+    onQueueMove: (Int, Int) -> Unit,
+    onQueueClear: () -> Unit,
     onCollapse: () -> Unit,
     onCollectionClick: (String) -> Unit,
     onPlayTrack: (Track) -> Unit,
@@ -158,6 +177,9 @@ private fun NowPlayingContent(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onToggleSaved: () -> Unit,
+    onDownload: (Track) -> Unit,
+    downloadStatus: com.spotkofi.app.data.service.DownloadManagerStatus?,
+    downloadProgress: Int,
     modifier: Modifier = Modifier,
 ) {
     val colors = SpotKofiTheme.colors
@@ -194,6 +216,7 @@ private fun NowPlayingContent(
     val collapsed by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
 
     var showOptions by remember { mutableStateOf(false) }
+    var showQueue by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // Hand-off intents are built here rather than in the sheet so the sheet stays
     // a dumb list of rows and can be previewed without a real Context.
@@ -207,15 +230,6 @@ private fun NowPlayingContent(
                 }
                 runCatching {
                     context.startActivity(Intent.createChooser(intent, "Share track"))
-                }
-            }
-        }
-    }
-    val openExternally: (Track) -> Unit = remember(context) {
-        { opened ->
-            opened.externalUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 }
             }
         }
@@ -291,19 +305,35 @@ private fun NowPlayingContent(
                         deviceName = state.deviceName,
                         canShare = track.isExternallyOpenable,
                         onShare = { shareTrack(track) },
+                        onShowQueue = { showQueue = true },
                         onMoreOptions = { showOptions = true },
                     )
                     Spacer(Modifier.height(dimens.spaceXl))
                 }
             }
 
-            // Only sections the catalog can actually fill.
+            // Only sections that can be filled with real data.
             //
-            // Lyrics, an artist biography, contributor credits and podcast tie-ins
-            // used to live here. The catalog API provides none of those, and the
-            // only way to keep the cards was to invent their contents, so they are
-            // gone rather than filled with fiction.
+            // Lyrics come from a lyrics provider at runtime and appear only when
+            // that provider actually has the track; the "about" card lists only
+            // fields the catalog returned. An artist biography and contributor
+            // credits are still absent because nothing supplies them, and inventing
+            // them would put fiction under a real song's title.
             if (details != null) {
+                details.lyrics?.takeIf { it.hasText || it.instrumental }?.let { lyrics ->
+                    item(key = "lyrics") {
+                        SectionSpacing {
+                            LyricsCard(lyrics = lyrics, positionMs = state.positionMs)
+                        }
+                    }
+                }
+
+                item(key = "about") {
+                    SectionSpacing {
+                        AboutTrackCard(track = track, genre = details.artistGenre)
+                    }
+                }
+
                 if (details.albumTracks.isNotEmpty()) {
                     item(key = "album_tracks") {
                         SectionSpacing {
@@ -385,7 +415,18 @@ private fun NowPlayingContent(
             onOpenAlbum = onCollectionClick,
             onOpenArtist = onCollectionClick,
             onShare = shareTrack,
-            onOpenExternally = openExternally,
+            onDownload = onDownload,
+            downloadStatus = downloadStatus,
+            downloadProgress = downloadProgress,
+        )
+        QueueSheet(
+            visible = showQueue,
+            queue = queue,
+            currentTrackId = state.track?.id,
+            onDismiss = { showQueue = false },
+            onRemove = onQueueRemove,
+            onMove = onQueueMove,
+            onClear = onQueueClear,
         )
     }
 }
@@ -525,30 +566,16 @@ private fun TrackInfoRow(
     }
 }
 
-/** Green filled circle when saved, hollow outline when not. */
+/**
+ * The saved control, delegating to the shared component.
+ *
+ * It used to be a private copy that lived only in this file, which is how the
+ * mini player ended up drawing a permanent plus while this screen showed a green
+ * check for the same track.
+ */
 @Composable
 private fun SavedCheck(isSaved: Boolean, onClick: () -> Unit) {
-    val colors = SpotKofiTheme.colors
-
-    Box(
-        modifier = Modifier
-            .size(30.dp)
-            .background(
-                color = if (isSaved) colors.accent else Color.Transparent,
-                shape = CircleShape,
-            )
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Check,
-            contentDescription = stringResource(
-                if (isSaved) R.string.cd_unfavourite else R.string.cd_favourite,
-            ),
-            tint = if (isSaved) colors.onAccent else colors.textSecondary,
-            modifier = Modifier.size(19.dp),
-        )
-    }
+    SavedToggle(isSaved = isSaved, onToggle = onClick)
 }
 
 @Composable
@@ -700,6 +727,7 @@ private fun SecondaryRow(
     deviceName: String?,
     canShare: Boolean,
     onShare: () -> Unit,
+    onShowQueue: () -> Unit,
     onMoreOptions: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
@@ -722,6 +750,14 @@ private fun SecondaryRow(
             modifier = Modifier.size(dimens.iconMd),
         )
         Spacer(Modifier.weight(1f))
+        IconButton(onClick = onShowQueue) {
+            Icon(
+                imageVector = Icons.Filled.QueueMusic,
+                contentDescription = "Open queue",
+                tint = colors.textSecondary,
+                modifier = Modifier.size(dimens.iconMd),
+            )
+        }
         if (canShare) {
             IconButton(onClick = onShare) {
                 Icon(
@@ -948,6 +984,10 @@ private fun NowPlayingPreview() {
                 deviceName = "SpotKofi Web Player",
             ),
             details = previewTrackDetails(),
+            queue = listOf(previewTrack()),
+            onQueueRemove = {},
+            onQueueMove = { _, _ -> },
+            onQueueClear = {},
             onCollapse = {},
             onCollectionClick = {},
             onPlayTrack = {},
@@ -961,6 +1001,9 @@ private fun NowPlayingPreview() {
             onToggleShuffle = {},
             onCycleRepeat = {},
             onToggleSaved = {},
+            onDownload = {},
+            downloadStatus = null,
+            downloadProgress = 0,
         )
     }
 }

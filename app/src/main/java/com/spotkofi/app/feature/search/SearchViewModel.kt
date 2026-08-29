@@ -209,7 +209,7 @@ class SearchViewModel(
             
             // Keep only last 10 searches
             if (current.size > 10) {
-                current.removeLast()
+                current.removeAt(current.lastIndex)
             }
             
             _recentSearches.value = current

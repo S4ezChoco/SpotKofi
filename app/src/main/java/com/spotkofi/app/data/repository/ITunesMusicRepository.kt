@@ -13,11 +13,15 @@ import com.spotkofi.app.data.model.ReleaseItem
 import com.spotkofi.app.data.model.SearchResults
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.TrackDetails
+import com.spotkofi.app.data.model.TrackLyrics
+import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.remote.ItunesApi
 import com.spotkofi.app.data.remote.ItunesMapper
+import com.spotkofi.app.data.remote.LyricsApi
 import com.spotkofi.app.data.remote.SpotifyApi
 import com.spotkofi.app.data.remote.SpotifyEnrichment
 import com.spotkofi.app.data.remote.SpotifyTrack
+import com.spotkofi.app.data.remote.YouTubeMusicHomeClient
 import com.spotkofi.app.data.remote.YouTubeMusicSearchClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -41,9 +45,12 @@ import kotlinx.coroutines.flow.update
 class ItunesMusicRepository internal constructor(
     private val itunes: ItunesApi,
     private val spotify: SpotifyApi,
+    private val localStore: LocalMusicStore? = null,
 ) : MusicRepository {
 
-    constructor() : this(ItunesApi(), SpotifyApi())
+    constructor() : this(ItunesApi(), SpotifyApi(), null)
+
+    constructor(localStore: LocalMusicStore) : this(ItunesApi(), SpotifyApi(), localStore)
 
     private val searchCache = mutableMapOf<String, SearchResults>()
     private val tracksCache = mutableMapOf<String, List<Track>>()
@@ -52,6 +59,8 @@ class ItunesMusicRepository internal constructor(
     private val tracksByCollection = mutableMapOf<String, List<Track>>()
     private val visited = MutableStateFlow<List<MediaCollection>>(emptyList())
     private val youtubeSearchClient = YouTubeMusicSearchClient()
+    private val youtubeHomeClient = YouTubeMusicHomeClient()
+    private val lyricsApi = LyricsApi()
 
     override fun currentUserName(): String = "kofi_listener"
 
@@ -63,6 +72,9 @@ class ItunesMusicRepository internal constructor(
     }
 
     override suspend fun homeSections(tab: HomeTab): List<HomeSection> = coroutineScope {
+        val youtubeSections = runCatalog { youtubeHomeClient.sections(tab) }.orEmpty()
+        if (youtubeSections.isNotEmpty()) return@coroutineScope youtubeSections
+
         when (tab) {
             HomeTab.All -> {
                 val albums = async { cachedAlbums("new music", limit = 12) }
@@ -121,35 +133,21 @@ class ItunesMusicRepository internal constructor(
                 }
             }
 
-            HomeTab.Following -> {
-                val recent = cachedAlbums("new music", limit = 12)
-                listOfNotNull(
-                    recent.takeIf { it.isNotEmpty() }?.let { albums ->
-                        HomeSection.Releases(
-                            id = "itunes_releases",
-                            title = "Latest releases",
-                            items = albums.map { album ->
-                                ReleaseItem(
-                                    id = album.id,
-                                    artistName = album.artistName,
-                                    title = album.title,
-                                    releasedLabel = album.year?.toString().orEmpty(),
-                                    songCount = album.trackCount,
-                                    artworkUrl = album.artworkUrl,
-                                )
-                            },
-                        )
-                    },
-                )
-            }
-
+            // iTunes is a music catalog. A podcast feed would have to be invented,
+            // so the tab reports nothing and the screen shows an empty state rather
+            // than fabricated shows.
             HomeTab.Podcasts -> emptyList()
         }
     }
 
-    override fun library(): Flow<List<MediaCollection>> = visited.asStateFlow()
+    override fun library(): Flow<List<MediaCollection>> =
+        localStore?.visitedCollections ?: visited.asStateFlow()
 
     override fun recordVisited(collection: MediaCollection) {
+        if (localStore != null) {
+            localStore.recordVisited(collection)
+            return
+        }
         visited.update { current ->
             (listOf(collection) + current.filterNot { it.id == collection.id })
                 .take(MAX_VISITED)
@@ -187,6 +185,9 @@ class ItunesMusicRepository internal constructor(
     // --------------------------------------------------------------- detail
 
     override suspend fun collection(id: String): MediaCollection? {
+        if (id.startsWith("local:playlist:")) {
+            return localStore?.playlist(id)
+        }
         collectionsById[id]?.let { return it }
 
         val resolved = when {
@@ -217,6 +218,9 @@ class ItunesMusicRepository internal constructor(
     }
 
     override suspend fun tracks(collectionId: String): List<Track> {
+        if (collectionId.startsWith("local:playlist:")) {
+            return localStore?.playlistTracks(collectionId).orEmpty()
+        }
         tracksByCollection[collectionId]?.let { return it }
 
         val rawId = when {
@@ -246,6 +250,19 @@ class ItunesMusicRepository internal constructor(
             track.artistId?.let { runCatalog { albumsForArtist(it) } }
                 ?: runCatalog { cachedAlbums(track.artistName, limit = 10) }
         }
+        // Lyrics are a separate provider and the slowest of the four, so they are
+        // fetched alongside the rest and allowed to fail on their own. A missing
+        // lyric sheet must never cost the user the album and artist rows.
+        val lyrics = async {
+            runCatalog {
+                lyricsApi.lyrics(
+                    title = track.title,
+                    artistName = track.artistName,
+                    albumTitle = track.albumTitle,
+                    durationMs = track.durationMs,
+                )
+            }
+        }
         val spotifyEnrichment = async {
             runCatalog { spotify.enrich(track.title, track.artistName) }
         }
@@ -262,6 +279,13 @@ class ItunesMusicRepository internal constructor(
             moreByArtist = artistTracks.await().orEmpty().filterNot { it.id == track.id },
             artistAlbums = artistAlbums.await().orEmpty(),
             recommendations = recommendations.filterNot { it.id == track.id },
+            lyrics = lyrics.await()?.let { result ->
+                TrackLyrics(
+                    plain = result.plain,
+                    synced = result.synced,
+                    instrumental = result.instrumental,
+                )
+            },
         )
     }
 

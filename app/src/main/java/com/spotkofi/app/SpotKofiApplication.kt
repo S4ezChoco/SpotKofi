@@ -11,6 +11,7 @@ class SpotKofiApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(context = this)
+        container.downloadManager.onApplicationReady()
     }
 
     override fun onTerminate() {

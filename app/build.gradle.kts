@@ -121,7 +121,10 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.pipepipe.extractor)
     implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.datasource)
+    implementation(libs.androidx.media3.database)
     implementation(libs.androidx.media3.datasource.okhttp)
+    implementation(libs.androidx.media3.session)
 
     // `ui-tooling` powers the @Preview renderer, debug-only so it is stripped
     // from release builds.

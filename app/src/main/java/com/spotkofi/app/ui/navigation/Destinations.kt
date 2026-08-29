@@ -11,6 +11,25 @@ import kotlinx.serialization.Serializable
  * build error instead of a crash at runtime.
  */
 
+/*
+ * Each tab is a nested graph, not a bare destination.
+ *
+ * A single flat graph made tab switching unreliable: `popUpTo(startDestination) {
+ * saveState = true }` keys the popped stack by the destination that was popped,
+ * which is the same route the very next `navigate(... restoreState = true)` asks
+ * for. Tapping a tab while inside an album therefore restored the album and the
+ * tap looked ignored. With one graph per tab, save/restore is keyed per tab, so
+ * each tab keeps its own detail stack and switching always lands on the tab.
+ */
+@Serializable
+data object HomeGraph
+
+@Serializable
+data object SearchGraph
+
+@Serializable
+data object LibraryGraph
+
 @Serializable
 data object HomeRoute
 

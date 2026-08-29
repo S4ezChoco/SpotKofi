@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface PlayerController {
     val state: StateFlow<PlaybackState>
 
-    /** Opens [track]'s official provider page, using [queue] for related handoffs. */
+    /** Starts [track] and uses [queue] as the ordered related-track list. */
     fun play(track: Track, queue: List<Track> = listOf(track))
 
     fun togglePlayPause()
@@ -25,4 +25,15 @@ interface PlayerController {
     fun cycleRepeatMode()
     fun toggleSaved()
     fun stop()
+}
+
+/** Queue editing surface shared by the player sheet and track context menus. */
+interface QueueController {
+    val queue: StateFlow<List<Track>>
+
+    fun addToQueue(track: Track)
+    fun playNext(track: Track)
+    fun removeFromQueue(trackId: String)
+    fun moveInQueue(from: Int, to: Int)
+    fun clearQueue()
 }

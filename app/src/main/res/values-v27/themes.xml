@@ -1,0 +1,13 @@
+<resources>
+
+    <!-- API 27 introduced the display-cutout window attribute. Keep the base
+         theme API-26 safe and use this complete style on newer devices. -->
+    <style name="Theme.SpotKofi" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/spotkofi_base</item>
+        <item name="android:statusBarColor">@color/transparent</item>
+        <item name="android:navigationBarColor">@color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
+</resources>

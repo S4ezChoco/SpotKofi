@@ -2,6 +2,7 @@ package com.spotkofi.app.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.HomeSection
 import com.spotkofi.app.data.model.HomeTab
 import com.spotkofi.app.data.model.MediaCollection
@@ -22,17 +23,12 @@ import kotlinx.coroutines.supervisorScope
 class HomeViewModel(
     private val repository: MusicRepository,
     private val player: PlayerController,
+    private val localStore: LocalMusicStore? = null,
 ) : ViewModel() {
 
     data class UiState(
         val userName: String = "",
         val selectedChip: HomeTab = HomeTab.All,
-        /**
-         * Following is a sub-filter of Music rather than a peer chip: it only
-         * appears once Music is active, and when both are lit the feed replaces
-         * the shelves entirely.
-         */
-        val followingActive: Boolean = false,
         val quickPicks: List<MediaCollection> = emptyList(),
         val sections: List<HomeSection> = emptyList(),
         val isLoading: Boolean = true,
@@ -44,11 +40,12 @@ class HomeViewModel(
          */
         val error: String? = null,
     ) {
-        /** Following only exists as an option while Music is the active chip. */
-        val followingVisible: Boolean get() = selectedChip == HomeTab.Music
+        /** The grid only makes sense while there is something in it. */
+        val showQuickPicks: Boolean get() = quickPicks.isNotEmpty()
 
-        /** The quick-pick grid is not part of the Following feed. */
-        val showQuickPicks: Boolean get() = !followingActive
+        /** True when the selected feed came back with nothing at all. */
+        val isEmpty: Boolean
+            get() = !isLoading && error == null && quickPicks.isEmpty() && sections.isEmpty()
     }
 
     private val _uiState = MutableStateFlow(UiState(userName = repository.currentUserName()))
@@ -63,8 +60,7 @@ class HomeViewModel(
     fun retry() = load()
 
     private fun load() {
-        val state = _uiState.value
-        val tab = if (state.followingActive) HomeTab.Following else state.selectedChip
+        val tab = _uiState.value.selectedChip
 
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
@@ -77,10 +73,23 @@ class HomeViewModel(
                 supervisorScope {
                     val picks = async { repository.quickPicks() }
                     val sections = async { repository.homeSections(tab) }
+                    val remoteSections = sections.await()
+                    val recentTracks = localStore?.history?.value.orEmpty().take(6)
+                    val displaySections = if (recentTracks.isEmpty()) {
+                        remoteSections
+                    } else {
+                        listOf(
+                            HomeSection.Songs(
+                                id = "local_recently_played",
+                                title = "Recently played",
+                                items = recentTracks,
+                            ),
+                        ) + remoteSections
+                    }
                     _uiState.update {
                         it.copy(
                             quickPicks = picks.await(),
-                            sections = sections.await(),
+                            sections = displaySections,
                             isLoading = false,
                         )
                     }
@@ -101,15 +110,10 @@ class HomeViewModel(
     }
 
     fun onChipClick(chip: HomeTab) {
-        _uiState.update { current ->
-            when (chip) {
-                // Toggling Following keeps Music selected underneath.
-                HomeTab.Following -> current.copy(followingActive = !current.followingActive)
-                // Leaving Music also clears Following, otherwise the feed would
-                // stay visible with no chip explaining why.
-                else -> current.copy(selectedChip = chip, followingActive = false)
-            }
-        }
+        // Re-tapping the active chip is a no-op rather than a reload: the feed is
+        // already the one being asked for.
+        if (_uiState.value.selectedChip == chip) return
+        _uiState.update { current -> current.copy(selectedChip = chip) }
         load()
     }
 

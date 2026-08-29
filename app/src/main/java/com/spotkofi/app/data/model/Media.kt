@@ -58,12 +58,10 @@ data class Album(
 }
 
 /**
- * A user-created playlist.
+ * A user-created playlist stored in the local library.
  *
- * The catalog API has no concept of playlists, so nothing constructs these yet.
- * The type stays because playlists are user data and will be created and stored
- * once accounts exist; Home and Library are built from albums and artists in the
- * meantime rather than inventing playlists to fill the layout.
+ * The remote catalog has no user playlists, so these records are created by the
+ * local store and mapped back into the same collection model used by the UI.
  */
 data class Playlist(
     override val id: String,
@@ -203,15 +201,35 @@ data class TrackDetails(
     val artistAlbums: List<Album> = emptyList(),
     /** Spotify recommendations resolved back to iTunes metadata. */
     val recommendations: List<Track> = emptyList(),
-    /** Raw lyrics text, if available from lrclib or better-lyrics. */
-    val lyrics: String? = null,
+    /**
+     * Lyrics for this recording, when a provider has them.
+     *
+     * Null means "not available", and the UI says exactly that. Nothing is
+     * generated locally to fill the gap.
+     */
+    val lyrics: TrackLyrics? = null,
 )
+
+/**
+ * Lyrics as returned by the provider, in whichever forms it had.
+ *
+ * [synced] carries `[mm:ss.xx]` stamps and is what a follow-along view needs;
+ * [plain] is the fallback. [instrumental] is a positive statement from the
+ * provider that the recording has no vocals, which is different from having no
+ * lyrics on file.
+ */
+data class TrackLyrics(
+    val plain: String? = null,
+    val synced: String? = null,
+    val instrumental: Boolean = false,
+) {
+    val hasText: Boolean get() = !plain.isNullOrBlank() || !synced.isNullOrBlank()
+}
 
 /** The filter chips across the top of Home. */
 enum class HomeTab(val label: String) {
     All("All"),
     Music("Music"),
-    Following("Following"),
     Podcasts("Podcasts"),
 }
 

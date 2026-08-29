@@ -25,13 +25,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.spotkofi.app.data.model.RepeatMode
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
+import com.spotkofi.app.data.service.DownloadManagerStatus
 import com.spotkofi.app.ui.motion.staggeredEntry
 import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
@@ -54,13 +55,8 @@ import com.spotkofi.app.ui.theme.SpotKofiTheme
 /**
  * The track options panel behind the player's 3-dot button.
  *
- * Follows the same pattern as the Create panel rather than `ModalBottomSheet`:
- * driven by a `visible` flag so the exit animation actually plays, with the scrim
- * kept as a separate animated alpha.
- *
- * Every row here does something real. Rows whose data is missing (no album id, no
- * external link) are omitted rather than shown disabled, because a menu full of
- * dead entries is worse than a short menu.
+ * Download is a real toggle: the label reflects the persisted record and the
+ * callback can pause, resume, retry, cancel, or delete through DownloadManager.
  */
 @Composable
 fun TrackOptionsSheet(
@@ -77,7 +73,10 @@ fun TrackOptionsSheet(
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
     onShare: (Track) -> Unit,
-    onOpenExternally: (Track) -> Unit,
+    onDownload: ((Track) -> Unit)? = null,
+    downloadStatus: DownloadManagerStatus? = null,
+    /** Percent transferred, shown while a download is running or paused. */
+    downloadProgress: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val colors = SpotKofiTheme.colors
@@ -89,10 +88,10 @@ fun TrackOptionsSheet(
         label = "trackOptionsScrim",
     )
 
-    // Leaves composition only once the exit has finished, so the panel is not
-    // ripped off-screen the instant `visible` flips.
     if (!visible && scrimAlpha == 0f) return
     if (track == null) return
+
+    val downloadLabel = downloadActionLabel(downloadStatus, downloadProgress)
 
     BackHandler(enabled = visible, onBack = onDismiss)
 
@@ -126,7 +125,6 @@ fun TrackOptionsSheet(
                     )
                     .padding(vertical = dimens.spaceMd),
             ) {
-                // Header: what these actions apply to, plus how long is left.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -179,6 +177,21 @@ fun TrackOptionsSheet(
                         onDismiss()
                     },
                 )
+                onDownload?.let { download ->
+                    OptionRow(
+                        index = row++,
+                        icon = if (downloadStatus == DownloadManagerStatus.COMPLETED) {
+                            Icons.Filled.Check
+                        } else {
+                            Icons.Outlined.FileDownload
+                        },
+                        label = downloadLabel,
+                        onClick = {
+                            download(track)
+                            onDismiss()
+                        },
+                    )
+                }
                 OptionRow(
                     index = row++,
                     icon = Icons.Filled.Shuffle,
@@ -229,21 +242,12 @@ fun TrackOptionsSheet(
                 }
                 if (track.isExternallyOpenable) {
                     OptionRow(
-                        index = row++,
+                        index = row,
                         icon = Icons.Filled.Share,
                         label = "Share",
                         onClick = {
                             onDismiss()
                             onShare(track)
-                        },
-                    )
-                    OptionRow(
-                        index = row,
-                        icon = Icons.Filled.OpenInNew,
-                        label = "Open in YouTube Music",
-                        onClick = {
-                            onDismiss()
-                            onOpenExternally(track)
                         },
                     )
                 }

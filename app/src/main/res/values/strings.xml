@@ -35,4 +35,15 @@
     <string name="cd_settings">Settings</string>
     <string name="cd_artwork">Artwork</string>
     <string name="cd_explicit">Explicit</string>
+
+    <!-- Playback service -->
+    <string name="playback_notification_channel">Playback</string>
+    <string name="playback_notification_channel_description">Controls for the song that is playing</string>
+    <string name="playback_notification_title">SpotKofi</string>
+
+    <!-- Offline download service -->
+    <string name="download_notification_channel">Downloads</string>
+    <string name="download_notification_channel_description">Offline music downloads</string>
+    <string name="download_notification_title">SpotKofi downloads</string>
+    <string name="download_notification_idle">Preparing offline download</string>
 </resources>
