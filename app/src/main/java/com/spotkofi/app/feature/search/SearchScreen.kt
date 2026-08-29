@@ -55,9 +55,12 @@ import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.SearchResults
 import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.TrackRow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 private data class SearchCategory(
@@ -87,21 +90,46 @@ fun SearchScreen(
     var results by remember { mutableStateOf<SearchResults?>(null) }
     var isSearching by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+    var searchGeneration by remember { mutableStateOf(0) }
+
+    fun cancelSearch() {
+        searchGeneration++
+        searchJob?.cancel()
+        searchJob = null
+        isSearching = false
+    }
 
     fun search(term: String) {
         val normalized = term.trim()
         if (normalized.isEmpty()) return
         query = normalized
-        scope.launch {
+
+        searchJob?.cancel()
+        val generation = searchGeneration + 1
+        searchGeneration = generation
+        searchJob = scope.launch {
             isSearching = true
             error = null
             try {
-                results = repository.search(normalized)
-            } catch (e: Exception) {
-                results = null
-                error = e.message ?: "Search failed"
+                val nextResults = repository.search(normalized)
+                if (generation == searchGeneration) {
+                    results = nextResults
+                }
+            } catch (cancelled: CancellationException) {
+                // Cancellation is control flow: do not turn an older search into
+                // an error after the user has already submitted a newer query.
+                throw cancelled
+            } catch (exception: Exception) {
+                if (generation == searchGeneration) {
+                    results = null
+                    error = exception.message ?: "Search failed"
+                }
             } finally {
-                isSearching = false
+                if (generation == searchGeneration) {
+                    isSearching = false
+                    searchJob = null
+                }
             }
         }
     }
@@ -124,6 +152,7 @@ fun SearchScreen(
             onQueryChange = { query = it },
             onSearch = ::search,
             onClear = {
+                cancelSearch()
                 query = ""
                 results = null
                 error = null
@@ -375,6 +404,7 @@ private fun ColumnScope.SearchResultsContent(
                 TrackRow(
                     track = track,
                     onClick = { onTrackClick(track, searchResults.tracks) },
+                    trailingText = track.durationMs.takeIf { it > 0L }?.asTrackDuration(),
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
             }

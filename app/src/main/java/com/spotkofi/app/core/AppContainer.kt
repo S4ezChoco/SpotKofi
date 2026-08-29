@@ -32,9 +32,9 @@ class AppContainer(
 
     val playerController: PlayerController = musicPlayerController
 
-    /** Releases the music player controller. */
+    /** Releases the music player controller and its Media3 decoder. */
     fun release() {
-        musicPlayerController.stop()
+        musicPlayerController.release()
     }
 }
 

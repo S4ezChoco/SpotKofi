@@ -6,224 +6,378 @@ import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.RepeatMode
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.service.MusicService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
+/**
+ * Coordinates queue state, stream resolution, and the Media3-backed player.
+ *
+ * Stream resolution is deliberately separate from Media3 preparation: a new
+ * selection cancels the previous resolver and a generation check prevents a
+ * slow old response from replacing the track the user selected most recently.
+ */
 class MusicPlayerController(
-    private val context: Context,
+    context: Context,
     private val musicService: MusicService,
 ) : PlayerController {
-    
-    private val coroutineScope = CoroutineScope(Dispatchers.Main)
+
+    private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val audioPlayer = AudioPlayer(context)
+    private var activePlaybackJob: Job? = null
+    private var playbackGeneration = 0L
     private var currentTrackIndex = 0
-    
+    private var playbackIntent = false
+    private var currentVideoId: String? = null
+    private var released = false
+
+    /** Short-lived in-memory cache; resolved YouTube URLs are not metadata IDs. */
+    private val streamUrlCache = linkedMapOf<String, String>()
+
     private val _state = MutableStateFlow(PlaybackState())
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
-    
+
     private val _queue = MutableStateFlow<List<Track>>(emptyList())
     val queue: StateFlow<List<Track>> = _queue.asStateFlow()
-    
+
     init {
         audioPlayer.setOnPlaybackStateChanged { isPlaying ->
-            _state.update { it.copy(isPlaying = isPlaying) }
-        }
-        
-        audioPlayer.setOnPlaybackProgressChanged { positionMs, durationMs ->
-            _state.update { 
-                it.copy(
-                    positionMs = positionMs,
-                    streamDurationMs = durationMs.takeIf { d -> d > 0 }
-                )
+            if (!released) {
+                _state.update { it.copy(isPlaying = isPlaying) }
             }
         }
-        
+
+        audioPlayer.setOnPlaybackProgressChanged { positionMs, durationMs ->
+            if (!released) {
+                _state.update { current ->
+                    current.copy(
+                        positionMs = positionMs,
+                        streamDurationMs = durationMs.takeIf { it > 0L }
+                            ?: current.streamDurationMs,
+                    )
+                }
+            }
+        }
+
         audioPlayer.setOnPlaybackError { error ->
-            _state.update { it.copy(error = error) }
+            if (!released) {
+                currentVideoId?.let(streamUrlCache::remove)
+                playbackIntent = false
+                _state.update { it.copy(isPlaying = false, error = error) }
+            }
+        }
+
+        audioPlayer.setOnPlaybackCompleted {
+            handlePlaybackCompleted()
         }
     }
-    
+
     override fun play(track: Track, queue: List<Track>) {
         coroutineScope.launch {
-            if (queue.isNotEmpty()) {
-                _queue.value = queue
-                currentTrackIndex = queue.indexOfFirst { it.id == track.id }.takeIf { it >= 0 } ?: 0
+            if (released) return@launch
+
+            val requestedQueue = queue.ifEmpty { listOf(track) }
+            val normalizedQueue = if (requestedQueue.any { it.id == track.id }) {
+                requestedQueue
             } else {
-                _queue.value = listOf(track)
-                currentTrackIndex = 0
+                listOf(track) + requestedQueue
             }
-            
-            startPlayback(track)
+            _queue.value = normalizedQueue
+            currentTrackIndex = normalizedQueue.indexOfFirst { it.id == track.id }
+                .coerceAtLeast(0)
+            playbackIntent = true
+            requestPlayback(track)
         }
     }
-    
+
     override fun togglePlayPause() {
-        if (audioPlayer.isPlaying()) {
-            audioPlayer.pause()
-        } else {
-            audioPlayer.resume()
+        coroutineScope.launch {
+            if (released || _state.value.track == null) return@launch
+
+            if (playbackIntent) {
+                playbackIntent = false
+                audioPlayer.pause()
+                _state.update { it.copy(isPlaying = false) }
+            } else {
+                playbackIntent = true
+                when {
+                    audioPlayer.hasMediaItem() -> audioPlayer.resume()
+                    activePlaybackJob?.isActive == true -> Unit
+                    else -> _state.value.track?.let(::requestPlayback)
+                }
+            }
         }
     }
-    
+
     override fun next() {
         coroutineScope.launch {
-            val queue = _queue.value
-            if (queue.isEmpty()) return@launch
-            
-            val currentMode = _state.value.repeatMode
-            when (currentMode) {
-                RepeatMode.One -> {
-                    val currentTrack = queue.getOrNull(currentTrackIndex)
-                    currentTrack?.let { startPlayback(it) }
-                }
-                RepeatMode.All -> {
-                    currentTrackIndex = (currentTrackIndex + 1) % queue.size
-                    val nextTrack = queue[currentTrackIndex]
-                    startPlayback(nextTrack)
-                }
-                RepeatMode.Off -> {
-                    if (currentTrackIndex < queue.size - 1) {
-                        currentTrackIndex++
-                        val nextTrack = queue[currentTrackIndex]
-                        startPlayback(nextTrack)
-                    } else {
-                        stop()
-                    }
-                }
+            if (released) return@launch
+            val currentQueue = _queue.value
+            if (currentQueue.isEmpty()) return@launch
+
+            if (currentTrackIndex < currentQueue.lastIndex) {
+                currentTrackIndex++
+                playbackIntent = true
+                requestPlayback(currentQueue[currentTrackIndex])
+            } else if (_state.value.repeatMode == RepeatMode.All || currentQueue.size == 1) {
+                currentTrackIndex = 0
+                playbackIntent = true
+                requestPlayback(currentQueue[currentTrackIndex])
+            } else {
+                stopInternal()
             }
         }
     }
-    
+
     override fun previous() {
         coroutineScope.launch {
-            val queue = _queue.value
-            if (queue.isEmpty()) return@launch
-            
-            if (_state.value.positionMs > 5000) {
-                val currentTrack = queue.getOrNull(currentTrackIndex)
-                currentTrack?.let { startPlayback(it) }
+            if (released) return@launch
+            val currentQueue = _queue.value
+            if (currentQueue.isEmpty()) return@launch
+
+            if (_state.value.positionMs > PREVIOUS_RESTART_THRESHOLD_MS) {
+                // Seeking the existing decoder avoids another network resolve and
+                // preserves whether the user was playing or paused.
+                audioPlayer.seekTo(0L)
+                _state.update { it.copy(positionMs = 0L) }
+                return@launch
+            }
+
+            if (currentTrackIndex > 0) {
+                currentTrackIndex--
+                playbackIntent = true
+                requestPlayback(currentQueue[currentTrackIndex])
             } else {
-                if (currentTrackIndex > 0) {
-                    currentTrackIndex--
-                    val prevTrack = queue[currentTrackIndex]
-                    startPlayback(prevTrack)
-                } else {
-                    val firstTrack = queue[0]
-                    startPlayback(firstTrack)
-                }
+                audioPlayer.seekTo(0L)
+                _state.update { it.copy(positionMs = 0L) }
             }
         }
     }
-    
+
     override fun seekToFraction(fraction: Float) {
-        val currentTrack = _state.value.track ?: return
-        val newPositionMs = (currentTrack.durationMs * fraction.coerceIn(0f, 1f)).toLong()
-        audioPlayer.seekTo(newPositionMs)
+        coroutineScope.launch {
+            if (released) return@launch
+            val duration = _state.value.effectiveDurationMs
+            if (duration <= 0L) return@launch
+
+            val position = (duration * fraction.coerceIn(0f, 1f)).toLong()
+            // AudioPlayer preserves playWhenReady, so a seek made while paused
+            // remains paused and a seek made while playing resumes after rebuffer.
+            audioPlayer.seekTo(position)
+        }
     }
-    
+
     override fun toggleShuffle() {
-        val newShuffled = !_state.value.isShuffled
-        
-        if (newShuffled && _queue.value.size > 1) {
-            val shuffledQueue = _queue.value.shuffled()
+        coroutineScope.launch {
+            if (released) return@launch
+            val newShuffled = !_state.value.isShuffled
             val currentTrack = _state.value.track
-            
-            // Ensure current track stays at position 0
-            val currentIndex = shuffledQueue.indexOfFirst { it.id == currentTrack?.id }
-            if (currentIndex > 0 && currentTrack != null) {
-                val mutableQueue = shuffledQueue.toMutableList()
-                mutableQueue.removeAt(currentIndex)
-                mutableQueue.add(0, currentTrack)
-                _queue.value = mutableQueue
-                currentTrackIndex = 0
-            } else {
-                _queue.value = shuffledQueue
-                currentTrackIndex = 0
+            val currentQueue = _queue.value
+
+            if (newShuffled && currentQueue.size > 1) {
+                val shuffledQueue = currentQueue.shuffled()
+                val reordered = if (currentTrack == null) {
+                    shuffledQueue
+                } else {
+                    listOf(currentTrack) + shuffledQueue.filterNot { it.id == currentTrack.id }
+                }
+                _queue.value = reordered
+                currentTrackIndex = reordered.indexOfFirst { it.id == currentTrack?.id }
+                    .takeIf { it >= 0 } ?: 0
             }
+
+            _state.update { it.copy(isShuffled = newShuffled) }
         }
-        
-        _state.update { it.copy(isShuffled = newShuffled) }
     }
-    
+
     override fun cycleRepeatMode() {
-        val currentMode = _state.value.repeatMode
-        val nextMode = when (currentMode) {
-            RepeatMode.Off -> RepeatMode.All
-            RepeatMode.All -> RepeatMode.One
-            RepeatMode.One -> RepeatMode.Off
+        coroutineScope.launch {
+            if (released) return@launch
+            val nextMode = when (_state.value.repeatMode) {
+                RepeatMode.Off -> RepeatMode.All
+                RepeatMode.All -> RepeatMode.One
+                RepeatMode.One -> RepeatMode.Off
+            }
+            _state.update { it.copy(repeatMode = nextMode) }
         }
-        _state.update { it.copy(repeatMode = nextMode) }
     }
-    
+
     override fun toggleSaved() {
-        _state.update { it.copy(isSaved = !it.isSaved) }
-    }
-    
-    override fun stop() {
-        audioPlayer.stop()
-        _state.update { 
-            it.copy(
-                track = null,
-                isPlaying = false,
-                positionMs = 0L,
-                error = null
-            )
+        coroutineScope.launch {
+            if (!released) _state.update { it.copy(isSaved = !it.isSaved) }
         }
     }
-    
-    private suspend fun startPlayback(track: Track) {
+
+    override fun stop() {
+        coroutineScope.launch {
+            if (!released) stopInternal()
+        }
+    }
+
+    /** Releases the resolver scope and the Media3 decoder. Safe to call twice. */
+    fun release() {
+        if (released) return
+        released = true
+        playbackGeneration++
+        activePlaybackJob?.cancel()
+        activePlaybackJob = null
+        playbackIntent = false
+        currentVideoId = null
+        streamUrlCache.clear()
+        audioPlayer.release()
+        coroutineScope.cancel()
+    }
+
+    private fun requestPlayback(track: Track) {
+        if (released) return
+
+        activePlaybackJob?.cancel()
+        val generation = ++playbackGeneration
+        audioPlayer.stop()
+        currentVideoId = track.videoId?.trim()?.takeIf { it.isNotEmpty() }
         _state.update {
             it.copy(
                 track = track,
                 isPlaying = false,
                 positionMs = 0L,
                 error = null,
-                streamDurationMs = track.durationMs
+                streamDurationMs = track.durationMs.takeIf { duration -> duration > 0L },
             )
         }
 
-        val audioUrl = track.audioUrl
-        val videoId = track.videoId
-        Log.d(
-            TAG,
-            "startPlayback title=${track.title} audioUrlPresent=${!audioUrl.isNullOrBlank()} " +
-                "videoIdPresent=${!videoId.isNullOrBlank()}",
-        )
-
-        val urlToPlay = if (!videoId.isNullOrBlank()) {
-            // A YouTube-backed track must never silently fall back to the iTunes
-            // preview. That fallback is what changed a real duration to 30 sec.
-            val streamUrl = musicService.getStreamUrl(videoId)
-            if (streamUrl.isNullOrBlank()) {
-                Log.e(TAG, "No full-length YouTube stream resolved for ${track.title}")
-                _state.update {
-                    it.copy(error = "Full-length stream unavailable; preview was not used")
+        activePlaybackJob = coroutineScope.launch {
+            val urlToPlay = try {
+                resolveStream(track)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Unable to resolve ${track.title}", error)
+                if (isCurrent(generation)) {
+                    playbackIntent = false
+                    _state.update {
+                        it.copy(
+                            isPlaying = false,
+                            error = "Unable to resolve audio: ${error.message.orEmpty()}",
+                        )
+                    }
                 }
-                return
+                return@launch
             }
-            Log.d(TAG, "Using resolved full-length YouTube stream for ${track.title}")
-            streamUrl
-        } else {
-            // Tracks without a YouTube ID can still use the catalog preview.
-            audioUrl
-        }
 
-        if (urlToPlay.isNullOrBlank()) {
-            _state.update {
-                it.copy(error = "No playable audio is available for this track")
+            if (!isCurrent(generation)) return@launch
+
+            if (urlToPlay.isNullOrBlank()) {
+                playbackIntent = false
+                _state.update {
+                    it.copy(
+                        isPlaying = false,
+                        error = if (track.videoId.isNullOrBlank()) {
+                            "No playable audio is available for this track"
+                        } else {
+                            "Full-length stream unavailable; preview was not used"
+                        },
+                    )
+                }
+                return@launch
             }
+
+            track.videoId?.trim()?.takeIf { it.isNotEmpty() }?.let { videoId ->
+                cacheStreamUrl(videoId, urlToPlay)
+            }
+            audioPlayer.play(urlToPlay, autoPlay = playbackIntent)
+        }
+    }
+
+    private suspend fun resolveStream(track: Track): String? {
+        val videoId = track.videoId?.trim()?.takeIf { it.isNotEmpty() }
+        return if (videoId != null) {
+            streamUrlCache[videoId] ?: withContext(Dispatchers.IO) {
+                musicService.getStreamUrl(videoId)
+            }
+        } else {
+            track.audioUrl?.trim()?.takeIf { it.isNotEmpty() }
+        }
+    }
+
+    private fun handlePlaybackCompleted() {
+        if (released) return
+
+        val currentQueue = _queue.value
+        if (currentQueue.isEmpty()) {
+            playbackIntent = false
             return
         }
 
-        audioPlayer.play(urlToPlay)
+        when (_state.value.repeatMode) {
+            RepeatMode.One -> {
+                currentQueue.getOrNull(currentTrackIndex)?.let { track ->
+                    playbackIntent = true
+                    requestPlayback(track)
+                }
+            }
+
+            RepeatMode.All -> {
+                currentTrackIndex = (currentTrackIndex + 1) % currentQueue.size
+                playbackIntent = true
+                requestPlayback(currentQueue[currentTrackIndex])
+            }
+
+            RepeatMode.Off -> {
+                if (currentTrackIndex < currentQueue.lastIndex) {
+                    currentTrackIndex++
+                    playbackIntent = true
+                    requestPlayback(currentQueue[currentTrackIndex])
+                } else {
+                    playbackIntent = false
+                    _state.update { it.copy(isPlaying = false) }
+                }
+            }
+        }
+    }
+
+    private fun stopInternal() {
+        activePlaybackJob?.cancel()
+        activePlaybackJob = null
+        playbackGeneration++
+        playbackIntent = false
+        currentVideoId = null
+        audioPlayer.stop()
+        _queue.value = emptyList()
+        currentTrackIndex = 0
+        _state.update {
+            it.copy(
+                track = null,
+                isPlaying = false,
+                positionMs = 0L,
+                streamDurationMs = null,
+                error = null,
+            )
+        }
+    }
+
+    private fun isCurrent(generation: Long): Boolean =
+        !released && generation == playbackGeneration
+
+    private fun cacheStreamUrl(videoId: String, url: String) {
+        streamUrlCache.remove(videoId)
+        streamUrlCache[videoId] = url
+        while (streamUrlCache.size > MAX_CACHED_STREAMS) {
+            streamUrlCache.remove(streamUrlCache.keys.first())
+        }
     }
 
     private companion object {
         const val TAG = "SpotKofiPlayer"
+        const val PREVIOUS_RESTART_THRESHOLD_MS = 5_000L
+        const val MAX_CACHED_STREAMS = 12
     }
 }

@@ -18,8 +18,7 @@ import com.spotkofi.app.data.remote.ItunesMapper
 import com.spotkofi.app.data.remote.SpotifyApi
 import com.spotkofi.app.data.remote.SpotifyEnrichment
 import com.spotkofi.app.data.remote.SpotifyTrack
-import com.spotkofi.app.data.remote.YouTubeMusicClient
-import com.spotkofi.app.data.remote.YouTubeStreamExtractor
+import com.spotkofi.app.data.remote.YouTubeMusicSearchClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -52,6 +51,7 @@ class ItunesMusicRepository internal constructor(
     private val collectionsById = mutableMapOf<String, MediaCollection>()
     private val tracksByCollection = mutableMapOf<String, List<Track>>()
     private val visited = MutableStateFlow<List<MediaCollection>>(emptyList())
+    private val youtubeSearchClient = YouTubeMusicSearchClient()
 
     override fun currentUserName(): String = "kofi_listener"
 
@@ -251,63 +251,67 @@ class ItunesMusicRepository internal constructor(
     private suspend fun cachedTracks(term: String, limit: Int): List<Track> {
         val key = "tracks:${term.trim().lowercase()}:$limit"
         tracksCache[key]?.let { return it }
-        
-        // First try to search YouTube for full-length tracks
-        val youtubeTracks = searchYouTubeTracksForIds(term, limit)
-        
-        // If YouTube search succeeded, use those tracks with video IDs
+
+        // YouTube Music owns the result identity and metadata so every visible
+        // row points at the song that produced its own video ID. iTunes remains
+        // an optional enrichment source and a fallback when YouTube is down.
+        val youtubeTracks = searchYouTubeTracks(term, limit)
         val tracks = if (youtubeTracks.isNotEmpty()) {
             youtubeTracks
         } else {
-            // Fall back to iTunes tracks (30-second previews)
-            ItunesMapper.toTracks(
-                itunes.search(term = term, entity = "musicTrack", limit = limit),
-            )
+            runCatalog {
+                ItunesMapper.toTracks(
+                    itunes.search(term = term, entity = "musicTrack", limit = limit),
+                )
+            }.orEmpty()
         }
-        
+
         tracksCache[key] = tracks
         return tracks
     }
-    
-    private suspend fun searchYouTubeTracksForIds(term: String, limit: Int): List<Track> {
-        val youTubeClient = YouTubeMusicClient()
-        val streamExtractor = YouTubeStreamExtractor()
 
-        // PipePipe uses the same search/extraction path as the reference app.
-        // Keep the old InnerTube request as a secondary search source.
-        val videoId = withContext(Dispatchers.IO) {
-            streamExtractor.searchVideoId(term)
-                ?: youTubeClient.searchYouTubeVideoId(term)
-        }
-        
-        if (videoId != null) {
-            // Use the first result from iTunes for metadata (except duration)
-            val itunesResults = itunes.search(term = term, entity = "musicTrack", limit = 1)
-            val itunesResult = itunesResults.firstOrNull()
-            
-            if (itunesResult != null) {
-                // Get track with videoId, then override duration with YouTube player duration
-                val baseTrack = ItunesMapper.toTrack(itunesResult, videoId = videoId)
-                if (baseTrack != null) {
-                    // Use the YouTube player duration when available. The
-                    // catalog duration remains the safe full-length fallback.
-                    val durationSeconds = withContext(Dispatchers.IO) {
-                        youTubeClient.getYouTubeVideoDuration(videoId)
-                    }
-                    // iTunes trackTimeMillis is full catalog duration; only
-                    // replace it when YouTube returned a valid duration.
-                    val durationMs = durationSeconds
-                        ?.toLongOrNull()
-                        ?.takeIf { it > 0L }
-                        ?.times(1000L)
-                        ?: baseTrack.durationMs
+    private suspend fun searchYouTubeTracks(term: String, limit: Int): List<Track> {
+        val candidates = runCatalog {
+            youtubeSearchClient.searchSongs(term, limit)
+        }.orEmpty()
+        if (candidates.isEmpty()) return emptyList()
 
-                    return listOf(baseTrack.copy(durationMs = durationMs))
-                }
+        // Match only for optional album/artist IDs and catalog artwork. Never
+        // replace the candidate title, performer, duration, or video identity.
+        val catalogTracks = runCatalog {
+            ItunesMapper.toTracks(
+                itunes.search(
+                    term = term,
+                    entity = "musicTrack",
+                    limit = limit.coerceAtLeast(25),
+                ),
+            )
+        }.orEmpty()
+
+        return candidates.map { candidate ->
+            val catalogMatch = catalogTracks.firstOrNull { catalog ->
+                normalize(catalog.title) == normalize(candidate.title) &&
+                    normalize(catalog.artistName) == normalize(candidate.artistName)
             }
+            Track(
+                id = "youtube:${candidate.videoId}",
+                title = candidate.title,
+                artistName = candidate.artistName,
+                albumTitle = candidate.albumTitle
+                    ?.takeIf { it.isNotBlank() }
+                    ?: catalogMatch?.albumTitle?.takeIf { it.isNotBlank() }
+                    ?: "YouTube Music",
+                durationMs = candidate.durationMs.takeIf { it > 0L }
+                    ?: catalogMatch?.durationMs?.takeIf { it > 0L }
+                    ?: 0L,
+                isExplicit = candidate.isExplicit || catalogMatch?.isExplicit == true,
+                artworkUrl = candidate.artworkUrl ?: catalogMatch?.artworkUrl,
+                externalUrl = "https://music.youtube.com/watch?v=${candidate.videoId}",
+                videoId = candidate.videoId,
+                albumId = catalogMatch?.albumId,
+                artistId = catalogMatch?.artistId,
+            )
         }
-        
-        return emptyList()
     }
 
     private suspend fun cachedAlbums(term: String, limit: Int): List<Album> {
