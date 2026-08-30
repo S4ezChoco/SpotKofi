@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.outlined.FileDownload
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +63,7 @@ import com.spotkofi.app.data.repository.previewCollection
 import com.spotkofi.app.data.repository.previewTracks
 import com.spotkofi.app.data.service.DownloadItem
 import com.spotkofi.app.ui.components.Artwork
+import com.spotkofi.app.ui.components.CollectionSkeleton
 import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.PlayButton
 import com.spotkofi.app.ui.components.TrackActionsSheet
@@ -187,9 +187,7 @@ private fun CollectionContent(
     val dimens = SpotKofiTheme.dimens
 
     if (state.isLoading) {
-        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = colors.accent)
-        }
+        CollectionSkeleton(modifier = modifier.fillMaxSize())
         return
     }
 

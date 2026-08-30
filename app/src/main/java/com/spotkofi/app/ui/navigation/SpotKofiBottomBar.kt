@@ -1,6 +1,7 @@
 package com.spotkofi.app.ui.navigation
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -112,10 +114,20 @@ private fun NavItem(
         label = "navPill",
     )
 
+    val selectionScale by animateFloatAsState(
+        targetValue = if (selected) 1.04f else 1f,
+        animationSpec = Motion.medium(),
+        label = "navSelectionScale",
+    )
+
     val interaction = remember { MutableInteractionSource() }
 
     Column(
         modifier = modifier
+            .graphicsLayer {
+                scaleX = selectionScale
+                scaleY = selectionScale
+            }
             .clip(RoundedCornerShape(24.dp))
             .background(pillColor)
             .selectable(

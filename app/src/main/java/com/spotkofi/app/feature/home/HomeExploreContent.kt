@@ -21,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,6 +47,9 @@ import com.spotkofi.app.data.repository.MoodCategoryContents
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.SectionHeader
+import com.spotkofi.app.ui.components.SkeletonBox
+import com.spotkofi.app.ui.components.SkeletonShelf
+import com.spotkofi.app.ui.components.SkeletonTrackRow
 import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.layout.ResponsiveLayout
 import com.spotkofi.app.ui.motion.clickableScale
@@ -73,13 +75,12 @@ fun HomeExploreSections(
     val selectedMood = state.selectedMood
     if (selectedMood != null || state.selectedFilter != HomeFilter.All) {
         if (state.isMoodLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(150.dp),
-                contentAlignment = Alignment.Center,
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(SpotKofiTheme.dimens.spaceMd),
             ) {
-                CircularProgressIndicator(color = SpotKofiTheme.colors.accent)
+                SkeletonShelf(gutter = layout.gutter)
+                repeat(4) { SkeletonTrackRow() }
             }
         } else if (selectedMood != null) {
             MoodResults(
@@ -319,6 +320,10 @@ private fun HomeChart(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickableScale(
+                            pressedScale = 0.98f,
+                            onClick = { onCollectionClick(artist.id) },
+                        )
                         .padding(
                             horizontal = layout.gutter,
                             vertical = dimens.spaceSm,
@@ -421,16 +426,16 @@ private fun RegionButton(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            text = regionCode,
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary,
-        )
         if (loading) {
-            CircularProgressIndicator(
-                color = colors.accent,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(15.dp),
+            SkeletonBox(
+                modifier = Modifier.size(26.dp, 18.dp),
+                shape = RoundedCornerShape(9.dp),
+            )
+        } else {
+            Text(
+                text = regionCode,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
             )
         }
     }

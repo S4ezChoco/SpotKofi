@@ -114,12 +114,14 @@ fun LyricsSheet(
     visible: Boolean,
     track: Track?,
     lyrics: TrackLyrics?,
+    /** Keeps the reader useful while track details and lyrics are being fetched. */
+    loading: Boolean = false,
     positionMs: Long,
     onDismiss: () -> Unit,
     onSeekTo: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (track == null || lyrics == null) return
+    if (track == null || (!loading && lyrics == null)) return
 
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -184,18 +186,26 @@ fun LyricsSheet(
             }
 
             Box(modifier = Modifier.weight(1f)) {
-                LyricsView(
-                    lyrics = lyrics,
-                    positionMs = positionMs,
-                    onSeekTo = onSeekTo,
-                    lineFontSize = 26.sp,
-                    // A tall tail so the closing lines can still reach the middle of
-                    // the screen instead of stopping at the bottom edge.
-                    contentPadding = PaddingValues(
-                        top = dimens.spaceXxl,
-                        bottom = dimens.spaceHuge * 3,
-                    ),
-                )
+                if (loading && lyrics == null) {
+                    LyricsSkeleton(
+                        modifier = Modifier.padding(dimens.spaceLg),
+                    )
+                } else {
+                    lyrics?.let { availableLyrics ->
+                        LyricsView(
+                            lyrics = availableLyrics,
+                            positionMs = positionMs,
+                            onSeekTo = onSeekTo,
+                            lineFontSize = 26.sp,
+                            // A tall tail so the closing lines can still reach the middle of
+                            // the screen instead of stopping at the bottom edge.
+                            contentPadding = PaddingValues(
+                                top = dimens.spaceXxl,
+                                bottom = dimens.spaceHuge * 3,
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

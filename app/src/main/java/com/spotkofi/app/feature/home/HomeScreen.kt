@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -47,6 +46,7 @@ import com.spotkofi.app.data.repository.previewHomeSections
 import com.spotkofi.app.data.repository.previewQuickPicks
 import com.spotkofi.app.data.service.DownloadItem
 import com.spotkofi.app.ui.components.AppFooter
+import com.spotkofi.app.ui.components.HomeSkeleton
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.ProfileAvatar
@@ -243,14 +243,11 @@ private fun HomeContent(
 
             if (state.isLoading) {
                 item(key = "loading") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(260.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(color = colors.accent)
-                    }
+                    HomeSkeleton(
+                        gutter = layout.gutter,
+                        gridColumns = layout.gridColumns,
+                        shelfWidth = layout.shelfCardWidth,
+                    )
                 }
                 return@LazyColumn
             }
@@ -497,7 +494,7 @@ private fun HomeSectionBlock(
                 items(items = section.items, key = { it.id }) { station ->
                     StationCard(
                         station = station,
-                        onClick = { },
+                        onClick = null,
                         width = layout.shelfCardWidth,
                     )
                 }
@@ -537,10 +534,10 @@ private fun HomeSectionBlock(
                 ) {
                     ReleaseCard(
                         release = release,
-                        onClick = { },
-                        onPlay = { },
-                        onAdd = { },
-                        onMore = { },
+                        onClick = null,
+                        onPlay = null,
+                        onAdd = null,
+                        onMore = null,
                     )
                 }
             }

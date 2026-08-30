@@ -51,7 +51,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -99,6 +98,8 @@ import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.AboutTrackCard
 import com.spotkofi.app.ui.components.LyricsCard
 import com.spotkofi.app.ui.components.LyricsSheet
+import com.spotkofi.app.ui.components.LyricsSkeleton
+import com.spotkofi.app.ui.components.LoadingDots
 import com.spotkofi.app.ui.components.QueueSheet
 import com.spotkofi.app.ui.components.SavedToggle
 import com.spotkofi.app.ui.components.TrackCreditsSheet
@@ -123,6 +124,8 @@ fun NowPlayingScreen(
     onDrag: (Float) -> Unit = {},
     /** Fling velocity in px/s when the finger lifts. */
     onDragStopped: (Float) -> Unit = {},
+    /** Follows a cancelled gesture back to the open player instead of settling by threshold. */
+    onDragCancelled: () -> Unit = {},
 ) {
     val container = LocalAppContainer.current
     val viewModel: NowPlayingViewModel = viewModel {
@@ -134,6 +137,7 @@ fun NowPlayingScreen(
     }
     val state by viewModel.playbackState.collectAsStateWithLifecycle()
     val details by viewModel.details.collectAsStateWithLifecycle()
+    val detailsLoading by viewModel.isDetailsLoading.collectAsStateWithLifecycle()
     val queue by container.queueController.queue.collectAsStateWithLifecycle()
     val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
     val download = state.track?.let { current ->
@@ -143,6 +147,7 @@ fun NowPlayingScreen(
     NowPlayingContent(
         state = state,
         details = details,
+        detailsLoading = detailsLoading,
         queue = queue,
         onQueueRemove = container.queueController::removeFromQueueAt,
         onQueueMove = container.queueController::moveInQueue,
@@ -152,6 +157,7 @@ fun NowPlayingScreen(
         onPlayTrack = viewModel::onPlayTrack,
         onDrag = onDrag,
         onDragStopped = onDragStopped,
+        onDragCancelled = onDragCancelled,
         onTogglePlayPause = viewModel::onTogglePlayPause,
         onNext = viewModel::onNext,
         onPrevious = viewModel::onPrevious,
@@ -175,6 +181,7 @@ fun NowPlayingScreen(
 private fun NowPlayingContent(
     state: PlaybackState,
     details: TrackDetails?,
+    detailsLoading: Boolean,
     queue: List<Track>,
     onQueueRemove: (Int) -> Unit,
     onQueueMove: (Int, Int) -> Unit,
@@ -184,6 +191,7 @@ private fun NowPlayingContent(
     onPlayTrack: (Track) -> Unit,
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
+    onDragCancelled: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -292,6 +300,7 @@ private fun NowPlayingContent(
                         onCollapse = onCollapse,
                         onDrag = onDrag,
                         onDragStopped = onDragStopped,
+                        onDragCancelled = onDragCancelled,
                         onSwipeHorizontal = { delta ->
                             if (delta < 0f) playNextWithAnimation() else playPreviousWithAnimation()
                         },
@@ -348,7 +357,15 @@ private fun NowPlayingContent(
             // fields the catalog returned. An artist biography and contributor
             // credits are still absent because nothing supplies them, and inventing
             // them would put fiction under a real song's title.
-            if (details != null) {
+            if (detailsLoading) {
+                item(key = "lyrics_loading") {
+                    SectionSpacing {
+                        LyricsSkeleton()
+                    }
+                }
+            }
+
+            if (!detailsLoading && details != null) {
                 details.lyrics?.takeIf { it.hasText || it.instrumental }?.let { lyrics ->
                     item(key = "lyrics") {
                         SectionSpacing {
@@ -455,7 +472,7 @@ private fun NowPlayingContent(
             onOpenAlbum = onCollectionClick,
             onOpenArtist = onCollectionClick,
             onShare = shareTrack,
-            onOpenLyrics = if (details?.lyrics?.let { it.hasText || it.instrumental } == true) {
+            onOpenLyrics = if (detailsLoading || details?.lyrics?.let { it.hasText || it.instrumental } == true) {
                 { showLyrics = true }
             } else {
                 null
@@ -479,6 +496,7 @@ private fun NowPlayingContent(
             visible = showLyrics,
             track = track,
             lyrics = details?.lyrics,
+            loading = detailsLoading,
             positionMs = state.positionMs,
             onDismiss = { showLyrics = false },
             onSeekTo = onSeekTo,
@@ -505,6 +523,7 @@ private fun HeroArtwork(
     onCollapse: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
+    onDragCancelled: () -> Unit,
     onSwipeHorizontal: (Float) -> Unit,
 ) {
     val dimens = SpotKofiTheme.dimens
@@ -537,7 +556,7 @@ private fun HeroArtwork(
                             onDragStopped(0f)
                         }
                     },
-                    onDragCancel = { onDragStopped(0f) },
+                    onDragCancel = onDragCancelled,
                 )
             },
     ) {
@@ -832,10 +851,9 @@ private fun WhitePlayButton(
         contentAlignment = Alignment.Center,
     ) {
         if (isLoading) {
-            CircularProgressIndicator(
+            LoadingDots(
                 color = Color.Black,
-                strokeWidth = 3.dp,
-                modifier = Modifier.size(30.dp),
+                modifier = Modifier.padding(horizontal = 3.dp),
             )
         } else {
             Icon(
@@ -1089,10 +1107,9 @@ private fun CollapsedBar(
         Spacer(Modifier.width(dimens.spaceSm))
         IconButton(onClick = onTogglePlayPause) {
             if (isLoading) {
-                CircularProgressIndicator(
+                LoadingDots(
                     color = colors.textPrimary,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(dimens.iconMd),
+                    modifier = Modifier.padding(horizontal = 3.dp),
                 )
             } else {
                 Icon(
@@ -1123,6 +1140,7 @@ private fun NowPlayingPreview() {
                 deviceName = "SpotKofi Web Player",
             ),
             details = previewTrackDetails(),
+            detailsLoading = false,
             queue = listOf(previewTrack()),
             onQueueRemove = {},
             onQueueMove = { _, _ -> },
@@ -1133,6 +1151,7 @@ private fun NowPlayingPreview() {
 
             onDrag = {},
             onDragStopped = {},
+            onDragCancelled = {},
             onTogglePlayPause = {},
             onNext = {},
             onPrevious = {},

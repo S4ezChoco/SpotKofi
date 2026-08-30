@@ -116,7 +116,6 @@ fun LibraryScreen(
     val scope = rememberCoroutineScope()
 
     val userName = remember { repository.currentUserName() }
-    val visited by repository.library().collectAsStateWithLifecycle(initialValue = emptyList())
     val savedCollections by store.savedCollections.collectAsStateWithLifecycle()
     val playlists by store.playlists.collectAsStateWithLifecycle()
     val savedTracks by store.savedTracks.collectAsStateWithLifecycle()
@@ -146,8 +145,10 @@ fun LibraryScreen(
         (savedTracks + history + downloadedTracks).distinctBy { it.id }
     }
 
-    val allCollections = remember(playlists, savedCollections, visited) {
-        (playlists + savedCollections + visited).distinctBy { it.id }
+    val allCollections = remember(playlists, savedCollections) {
+        // Visiting a collection is navigation history, not a library save. It must
+        // not make a remote album or artist appear under "Recently Added".
+        (playlists + savedCollections).distinctBy { it.id }
     }
     val followedArtists = remember(savedCollections) {
         savedCollections.filterIsInstance<Artist>()
@@ -714,7 +715,7 @@ private fun LibraryEmptyState(filter: LibraryFilter) {
     ) {
         Text(
             text = when (filter) {
-                LibraryFilter.All -> "Nothing saved yet"
+                LibraryFilter.All -> "Your library is empty"
                 LibraryFilter.Downloaded -> "No offline songs"
                 else -> "No ${filter.label.lowercase()} yet"
             },

@@ -2,7 +2,6 @@ package com.spotkofi.app.feature.profile
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,8 +20,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
@@ -30,7 +27,6 @@ import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -39,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,7 +80,6 @@ fun ProfileDrawer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { /* Phase 3: public profile */ }
                 .padding(dimens.spaceLg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -98,7 +92,7 @@ fun ProfileDrawer(
                     color = colors.textPrimary,
                 )
                 Text(
-                    text = "View profile",
+                    text = "Profile",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textSecondary,
                 )
@@ -110,13 +104,13 @@ fun ProfileDrawer(
         Spacer(Modifier.height(dimens.spaceSm))
 
         // ---- Account menu ----
-        DrawerRow(Icons.Filled.Add, "Add account", index = 0) { }
+        DrawerRow(Icons.Filled.Add, "Add account", index = 0)
         // No subscription tier shown: there is no account system yet, so a plan
         // badge here would be inventing state the app does not have.
-        DrawerRow(Icons.Filled.WorkspacePremium, "Subscription", index = 1) { }
-        DrawerRow(Icons.Filled.ShowChart, "Listening stats", index = 2) { }
-        DrawerRow(Icons.Filled.History, "Recents", index = 3) { }
-        DrawerRow(Icons.Filled.Campaign, "Your Updates", index = 4) { }
+        DrawerRow(Icons.Filled.WorkspacePremium, "Subscription", index = 1)
+        DrawerRow(Icons.Filled.ShowChart, "Listening stats", index = 2)
+        DrawerRow(Icons.Filled.History, "Recents", index = 3)
+        DrawerRow(Icons.Filled.Campaign, "Your Updates", index = 4)
         DrawerRow(Icons.Filled.Settings, "Settings and privacy", index = 5, onClick = onSettings)
 
         Spacer(Modifier.height(dimens.spaceLg))
@@ -129,7 +123,6 @@ fun ProfileDrawer(
             horizontalArrangement = Arrangement.spacedBy(dimens.spaceLg),
         ) {
             friends.forEach { friend -> FriendBubble(friend) }
-            InviteBubble()
         }
 
         Spacer(Modifier.height(dimens.spaceXl))
@@ -141,32 +134,11 @@ fun ProfileDrawer(
                 .padding(horizontal = dimens.spaceLg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { /* Phase 4: full message list */ },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Messages",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = colors.textPrimary,
-                )
-                Icon(
-                    imageVector = Icons.Filled.ChevronRight,
-                    contentDescription = null,
-                    tint = colors.textPrimary,
-                    modifier = Modifier.size(dimens.iconMd),
-                )
-            }
-            IconButton(onClick = { /* Phase 4: compose */ }) {
-                Icon(
-                    imageVector = Icons.Filled.Create,
-                    contentDescription = stringResource(R.string.cd_new_message),
-                    tint = colors.textPrimary,
-                    modifier = Modifier.size(dimens.iconMd),
-                )
-            }
+            Text(
+                text = "Messages",
+                style = MaterialTheme.typography.headlineLarge,
+                color = colors.textPrimary,
+            )
         }
 
         Spacer(Modifier.height(dimens.spaceSm))
@@ -175,34 +147,9 @@ fun ProfileDrawer(
             ConversationRow(conversation, index = index + 6)
         }
 
-        // ---- New message ----
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { /* Phase 4: compose */ }
-                .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(colors.iconWell, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Create,
-                    contentDescription = null,
-                    tint = colors.textSecondary,
-                    modifier = Modifier.size(dimens.iconSm),
-                )
-            }
-            Spacer(Modifier.width(dimens.spaceMd))
-            Text(
-                text = "New message",
-                style = MaterialTheme.typography.titleLarge,
-                color = colors.textPrimary,
-            )
-        }
+        // Messaging is intentionally read-only until conversations have a real
+        // destination. Showing a tappable compose row here used to imply a feature
+        // that could not complete.
     }
 }
 
@@ -211,16 +158,22 @@ private fun DrawerRow(
     icon: ImageVector,
     label: String,
     index: Int,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .staggeredEntry(index, slide = 12.dp)
+        .then(
+            onClick?.let { callback ->
+                Modifier.clickableScale(pressedScale = 0.98f, onClick = callback)
+            } ?: Modifier,
+        )
+
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .staggeredEntry(index, slide = 12.dp)
-            .clickableScale(pressedScale = 0.98f, onClick = onClick)
+        modifier = rowModifier
             .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -303,41 +256,7 @@ private fun FriendBubble(friend: FriendActivity) {
     }
 }
 
-@Composable
-private fun InviteBubble() {
-    val colors = SpotKofiTheme.colors
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .width(56.dp)
-            .clickable { /* Phase 4: invite flow */ },
-    ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .background(colors.iconWell, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = null,
-                tint = colors.textPrimary,
-                modifier = Modifier.size(SpotKofiTheme.dimens.iconMd),
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "Invite friends",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textPrimary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
-
+// Invite and messaging actions are intentionally omitted until they have real destinations.
 @Composable
 private fun ConversationRow(conversation: Conversation, index: Int) {
     val colors = SpotKofiTheme.colors
@@ -347,7 +266,6 @@ private fun ConversationRow(conversation: Conversation, index: Int) {
         modifier = Modifier
             .fillMaxWidth()
             .staggeredEntry(index, slide = 12.dp)
-            .clickableScale(pressedScale = 0.98f) { /* Phase 4: open the thread */ }
             .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {

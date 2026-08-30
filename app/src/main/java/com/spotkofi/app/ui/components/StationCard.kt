@@ -44,7 +44,7 @@ import com.spotkofi.app.ui.theme.SpotKofiTheme
 @Composable
 fun StationCard(
     station: Station,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     width: Dp = SpotKofiTheme.dimens.artworkCard,
 ) {
@@ -66,7 +66,11 @@ fun StationCard(
                 .aspectRatio(1f)
                 .clip(SpotKofiTheme.shapes.tile)
                 .background(panel)
-                .clickableScale(onClick = onClick),
+                .then(
+                    onClick?.let { callback ->
+                        Modifier.clickableScale(onClick = callback)
+                    } ?: Modifier,
+                ),
         ) {
             // Brand dot, standing in for the service logo.
             Box(

@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -229,10 +228,9 @@ fun MiniPlayer(
 
             IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(44.dp)) {
                 if (state.isLoading) {
-                    CircularProgressIndicator(
+                    LoadingDots(
                         color = colors.textPrimary,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(dimens.iconMd),
+                        modifier = Modifier.padding(horizontal = 3.dp),
                     )
                 } else {
                     Icon(

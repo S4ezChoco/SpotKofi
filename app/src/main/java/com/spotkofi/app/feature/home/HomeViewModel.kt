@@ -136,13 +136,22 @@ class HomeViewModel(
         val region = regionOverride
             ?: settingsStore?.current?.contentRegion
             ?: _uiState.value.regionCode
+        val isRegionReload = regionOverride != null && !refreshing
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     regionCode = region,
-                    isLoading = if (refreshing) it.isLoading else true,
+                    // Region changes keep the old feed visible while the chart and
+                    // region shelves refresh in place. Initial loads still use the
+                    // full-page skeleton.
+                    isLoading = if (refreshing || isRegionReload) {
+                        it.isLoading
+                    } else {
+                        true
+                    },
                     isRefreshing = refreshing,
+                    isRegionLoading = isRegionReload,
                     error = null,
                     isMoodLoading = false,
                     selectedMood = null,
@@ -193,6 +202,7 @@ class HomeViewModel(
                             chart = loadedChart?.takeUnless { value -> value.isEmpty },
                             isLoading = false,
                             isRefreshing = false,
+                            isRegionLoading = false,
                         )
                     }
                 }
@@ -203,6 +213,7 @@ class HomeViewModel(
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
+                        isRegionLoading = false,
                         error = failure.message ?: "Could not load music",
                     )
                 }

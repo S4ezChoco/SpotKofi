@@ -46,10 +46,10 @@ import com.spotkofi.app.ui.theme.SpotKofiTheme
 @Composable
 fun ReleaseCard(
     release: ReleaseItem,
-    onClick: () -> Unit,
-    onPlay: () -> Unit,
-    onAdd: () -> Unit,
-    onMore: () -> Unit,
+    onClick: (() -> Unit)?,
+    onPlay: (() -> Unit)?,
+    onAdd: (() -> Unit)?,
+    onMore: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val colors = SpotKofiTheme.colors
@@ -64,7 +64,11 @@ fun ReleaseCard(
             .fillMaxWidth()
             .clip(SpotKofiTheme.shapes.card)
             .background(tint)
-            .clickable(onClick = onClick)
+            .then(
+                onClick?.let { callback ->
+                    Modifier.clickable(onClick = callback)
+                } ?: Modifier,
+            )
             .padding(dimens.spaceMd),
     ) {
         Row(verticalAlignment = Alignment.Top) {
@@ -98,16 +102,18 @@ fun ReleaseCard(
                 )
             }
 
-            IconButton(
-                onClick = onMore,
-                modifier = Modifier.size(dimens.iconLg),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.MoreVert,
-                    contentDescription = stringResource(R.string.cd_more_options),
-                    tint = colors.textSecondary,
-                    modifier = Modifier.size(dimens.iconMd),
-                )
+            if (onMore != null) {
+                IconButton(
+                    onClick = { onMore() },
+                    modifier = Modifier.size(dimens.iconLg),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = stringResource(R.string.cd_more_options),
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(dimens.iconMd),
+                    )
+                }
             }
         }
 
@@ -126,39 +132,47 @@ fun ReleaseCard(
             overflow = TextOverflow.Ellipsis,
         )
 
-        Spacer(Modifier.height(dimens.spaceMd))
+        if (onPlay != null || onAdd != null) {
+            Spacer(Modifier.height(dimens.spaceMd))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            PreviewPill(onClick = onPlay)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onPlay != null) {
+                    PreviewPill(onClick = { onPlay() })
+                }
 
-            Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
 
-            IconButton(onClick = onAdd) {
-                Icon(
-                    imageVector = Icons.Filled.AddCircleOutline,
-                    contentDescription = stringResource(R.string.cd_add_to_library),
-                    tint = colors.textPrimary,
-                    modifier = Modifier.size(dimens.iconLg),
-                )
-            }
+                if (onAdd != null) {
+                    IconButton(onClick = { onAdd() }) {
+                        Icon(
+                            imageVector = Icons.Filled.AddCircleOutline,
+                            contentDescription = stringResource(R.string.cd_add_to_library),
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(dimens.iconLg),
+                        )
+                    }
+                }
 
-            Spacer(Modifier.width(dimens.spaceXs))
+                if (onPlay != null) {
+                    Spacer(Modifier.width(dimens.spaceXs))
 
-            // Solid white circle, unlike the green button used elsewhere. On a
-            // tinted card white separates from every seed colour; green does not.
-            Box(
-                modifier = Modifier
-                    .size(dimens.playButtonSm)
-                    .background(Color.White, CircleShape)
-                    .clickable(onClick = onPlay),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.PlayArrow,
-                    contentDescription = stringResource(R.string.cd_play),
-                    tint = Color.Black,
-                    modifier = Modifier.size(dimens.iconMd),
-                )
+                    // Solid white circle, unlike the green button used elsewhere.
+                    // It is shown only when a real play action is supplied.
+                    Box(
+                        modifier = Modifier
+                            .size(dimens.playButtonSm)
+                            .background(Color.White, CircleShape)
+                            .clickable { onPlay() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = stringResource(R.string.cd_play),
+                            tint = Color.Black,
+                            modifier = Modifier.size(dimens.iconMd),
+                        )
+                    }
+                }
             }
         }
     }

@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +38,7 @@ import com.spotkofi.app.data.model.MoodCategory
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.ErrorState
+import com.spotkofi.app.ui.components.ExploreSkeleton
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.SectionHeader
 import com.spotkofi.app.ui.components.TrackActionsSheetHost
@@ -137,12 +137,7 @@ fun MoodCategoryScreen(
                     )
                 }
 
-                state.isLoading -> Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = colors.accent)
-                }
+                state.isLoading -> ExploreSkeleton(modifier = Modifier.fillMaxSize())
 
                 state.isEmpty -> Box(
                     modifier = Modifier.fillMaxSize(),

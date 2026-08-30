@@ -33,6 +33,9 @@ class NowPlayingViewModel(
     private val _details = MutableStateFlow<TrackDetails?>(null)
     val details: StateFlow<TrackDetails?> = _details.asStateFlow()
 
+    private val _isDetailsLoading = MutableStateFlow(false)
+    val isDetailsLoading: StateFlow<Boolean> = _isDetailsLoading.asStateFlow()
+
     init {
         viewModelScope.launch {
             // A provider change is a real data change even when the track id stays
@@ -45,7 +48,25 @@ class NowPlayingViewModel(
                 .distinctUntilChanged()
             combine(trackFlow, lyricsConfig) { track, _ -> track }
                 .collect { track ->
-                    _details.value = track?.let { repository.trackDetails(it) }
+                    if (track == null) {
+                        _isDetailsLoading.value = false
+                        _details.value = null
+                        return@collect
+                    }
+
+                    _isDetailsLoading.value = true
+                    try {
+                        _details.value = repository.trackDetails(track)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // The player remains usable even when an enrichment provider
+                        // is offline; the loading skeleton simply gives way to the
+                        // controls and any data that was already available.
+                        _details.value = null
+                    } finally {
+                        _isDetailsLoading.value = false
+                    }
                 }
         }
     }

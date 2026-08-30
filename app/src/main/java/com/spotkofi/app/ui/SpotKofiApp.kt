@@ -88,11 +88,8 @@ import kotlinx.coroutines.launch
 /** How far the tab behind the player is blurred when the player is fully open. */
 private val MaxBackdropBlur = 20.dp
 
-/** Fraction of the screen the player must be dragged past to dismiss on release. */
-private const val MINIMIZE_FRACTION = 0.2f
-
-/** Downward fling speed, px/s, that minimizes regardless of distance dragged. */
-private const val MINIMIZE_VELOCITY_PX = 1100f
+/** Fraction of the screen the player must be dragged down before release dismisses it. */
+private const val MINIMIZE_FRACTION = 0.82f
 
 /**
  * Root of the composable tree: provides the dependency container and theme, owns
@@ -314,10 +311,16 @@ fun SpotKofiApp(
                             // invented here.
                             enterTransition = {
                                 if (isTabSwitch()) {
-                                    // The destination roots are opaque, so a short
-                                    // fade is safe; do not combine it with the
-                                    // outgoing collection slide.
-                                    fadeIn(tween(Motion.Fast, easing = Motion.Standard))
+                                    // Tab switches move horizontally as one surface:
+                                    // the incoming root slides in while the old root
+                                    // fades and moves out, so changing tabs feels like
+                                    // a deliberate navigation rather than a flash.
+                                    fadeIn(tween(Motion.Medium, easing = Motion.Standard)) +
+                                        slideInHorizontally(
+                                            tween(Motion.Medium, easing = Motion.Emphasized),
+                                        ) { width ->
+                                            width * tabSwitchDirection() / 6
+                                        }
                                 } else {
                                     fadeIn(tween(Motion.Medium, easing = Motion.Emphasized)) +
                                         slideInVertically(
@@ -327,7 +330,12 @@ fun SpotKofiApp(
                             },
                             exitTransition = {
                                 if (isTabSwitch()) {
-                                    ExitTransition.None
+                                    fadeOut(tween(Motion.Medium, easing = Motion.Standard)) +
+                                        slideOutHorizontally(
+                                            tween(Motion.Medium, easing = Motion.Emphasized),
+                                        ) { width ->
+                                            -width * tabSwitchDirection() / 6
+                                        }
                                 } else {
                                     fadeOut(tween(Motion.Fast, easing = Motion.Standard)) +
                                         slideOutVertically(
@@ -449,7 +457,11 @@ fun SpotKofiApp(
                                     onToggleSaved = container.playerController::toggleSaved,
                                     onNext = container.playerController::next,
                                     onPrevious = container.playerController::previous,
-                                    onDismiss = container.playerController::stop,
+                                    onDismiss = {
+                                        if (settings.stopOnPlayerDismiss) {
+                                            container.playerController.stop()
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -546,12 +558,17 @@ fun SpotKofiApp(
                                             .coerceIn(0f, 1f)
                                 },
                                 onDragStopped = { velocity ->
-                                    val dismiss = playerPos.floatValue > MINIMIZE_FRACTION ||
-                                        velocity > MINIMIZE_VELOCITY_PX
-                                    // A downward swipe only minimizes the window. Playback
-                                    // remains available through the mini player; stopping
-                                    // is an explicit action in the full-player menu.
+                                    // A partial downward gesture is reversible. Only a
+                                    // near-complete drag dismisses the full player;
+                                    // playback remains in the mini player.
+                                    val dismiss = playerPos.floatValue >= MINIMIZE_FRACTION
                                     settlePlayer(open = !dismiss, velocityPxPerSec = velocity)
+                                },
+                                onDragCancelled = {
+                                    // Pointer cancellation is not a release decision.
+                                    // Always return to the full player instead of
+                                    // accidentally dismissing after a half drag.
+                                    settlePlayer(open = true)
                                 },
                             )
                         }
@@ -623,6 +640,20 @@ private fun androidx.compose.animation.AnimatedContentTransitionScope<NavBackSta
     val from = initialState.destination.topLevelTab()
     val to = targetState.destination.topLevelTab()
     return from != null && to != null && from != to
+}
+
+private fun androidx.compose.animation.AnimatedContentTransitionScope<NavBackStackEntry>
+    .tabSwitchDirection(): Int {
+    val from = initialState.destination.topLevelTab()
+    val to = targetState.destination.topLevelTab()
+    if (from == null || to == null) return 1
+    return if (tabOrder(to) >= tabOrder(from)) 1 else -1
+}
+
+private fun tabOrder(destination: TopLevelDestination): Int = when (destination) {
+    TopLevelDestination.Home -> 0
+    TopLevelDestination.Search -> 1
+    TopLevelDestination.Library -> 2
 }
 
 /**

@@ -23,7 +23,6 @@ class CollectionViewModel(
     data class UiState(
         val collection: MediaCollection? = null,
         val tracks: List<Track> = emptyList(),
-        val isSaved: Boolean = false,
         val isLoading: Boolean = true,
         /** Set when the lookup failed, or when the catalog has no such entry. */
         val error: String? = null,
@@ -99,7 +98,4 @@ class CollectionViewModel(
         player.play(track, _uiState.value.tracks)
     }
 
-    fun onToggleSave() {
-        _uiState.update { it.copy(isSaved = !it.isSaved) }
-    }
 }

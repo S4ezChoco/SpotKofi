@@ -104,6 +104,10 @@ fun SettingsScreen(
     val downloadStats by container.downloadManager.totalDownloadStats
         .collectAsStateWithLifecycle()
     val history by container.localStore.history.collectAsStateWithLifecycle()
+    val savedTracks by container.localStore.savedTracks.collectAsStateWithLifecycle()
+    val savedCollections by container.localStore.savedCollections.collectAsStateWithLifecycle()
+    val visitedCollections by container.localStore.visitedCollections.collectAsStateWithLifecycle()
+    val playlists by container.localStore.playlists.collectAsStateWithLifecycle()
 
     var showRegionPicker by remember { mutableStateOf(false) }
     var showLyricsProviderPicker by remember { mutableStateOf(false) }
@@ -297,6 +301,17 @@ fun SettingsScreen(
                 )
                 RowDivider()
                 ActionRow(
+                    icon = Icons.Filled.DeleteSweep,
+                    title = "Clear library data",
+                    subtitle = "Remove saved songs, collections, playlists and recents",
+                    onClick = { confirm = ConfirmAction.ClearLibrary },
+                    enabled = savedTracks.isNotEmpty() ||
+                        savedCollections.isNotEmpty() ||
+                        visitedCollections.isNotEmpty() ||
+                        playlists.isNotEmpty(),
+                )
+                RowDivider()
+                ActionRow(
                     icon = Icons.Filled.RestartAlt,
                     title = "Reset settings",
                     subtitle = "Put every option back to its default",
@@ -364,6 +379,9 @@ fun SettingsScreen(
                     }
 
                     ConfirmAction.ClearHistory -> container.localStore.clearHistory()
+                    ConfirmAction.ClearLibrary -> scope.launch {
+                        container.localStore.clearLibraryData()
+                    }
                     ConfirmAction.ClearCompleted ->
                         container.downloadManager.clearCompletedDownloads()
 
@@ -741,6 +759,13 @@ private enum class ConfirmAction(
             "songs and playlists stay.",
         confirmLabel = "Clear",
         icon = Icons.Filled.History,
+    ),
+    ClearLibrary(
+        title = "Clear library data?",
+        message = "Saved songs, saved collections, visited collections, and playlists " +
+            "created in this app will be removed. Downloads and listening history stay.",
+        confirmLabel = "Clear",
+        icon = Icons.Filled.DeleteSweep,
     ),
     ClearCompleted(
         title = "Clear finished downloads?",

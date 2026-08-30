@@ -1,6 +1,5 @@
 package com.spotkofi.app.feature.search
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,10 +27,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -50,6 +47,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,7 +61,9 @@ import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.Artwork
+import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.ProfileAvatar
+import com.spotkofi.app.ui.components.SearchSkeleton
 import com.spotkofi.app.ui.components.SpotKofiChip
 import com.spotkofi.app.ui.components.TrackActionsSheet
 import com.spotkofi.app.ui.components.TrackRow
@@ -114,10 +114,10 @@ private val searchCategories = listOf(
 /**
  * Search.
  *
- * Results arrive while typing rather than on submit, and the previous results
- * stay on screen while the next request runs: replacing the list with a spinner
- * on every keystroke made the screen flash and hid the very rows the user was
- * reading.
+ * Results arrive while typing rather than on submit. During a new request the
+ * matching result list is replaced by a shaped skeleton, so an older query can
+ * never be mistaken for the current one and the screen does not flash through a
+ * generic spinner.
  *
  * Artists lead the results because a name typed into a music app is usually a
  * performer, and the songs that follow are the ones that name produced.
@@ -136,29 +136,34 @@ fun SearchScreen(
 
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<SearchResults?>(null) }
+    var resultQuery by remember { mutableStateOf<String?>(null) }
     var isSearching by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var retryNonce by remember { mutableStateOf(0) }
     var filter by remember { mutableStateOf(SearchFilter.All) }
 
     val playlists by container.localStore.playlists.collectAsStateWithLifecycle()
 
-    // Keyed on the query, so a new keystroke cancels the in-flight request for the
-    // old one. That replaces the manual job plus generation counter this screen
-    // used to carry: the effect itself is the guard, and a cancelled search can no
-    // longer publish over a newer one.
-    LaunchedEffect(query) {
+    // Keyed on the query and retry nonce, so a new keystroke cancels the old
+    // request while the retry action can run the same query again. Results are
+    // tagged with the term that produced them, which prevents an older response
+    // from being rendered under a newer query.
+    LaunchedEffect(query, retryNonce) {
         val term = query.trim()
         if (term.length < MinQueryLength) {
             results = null
+            resultQuery = null
             error = null
             isSearching = false
             return@LaunchedEffect
         }
         isSearching = true
+        error = null
+        resultQuery = null
         delay(SearchDebounceMs)
         try {
             results = repository.search(term)
-            error = null
+            resultQuery = term
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (exception: Exception) {
@@ -186,44 +191,22 @@ fun SearchScreen(
                 onClear = { query = "" },
             )
 
-            // A thin bar rather than a full-screen spinner: the results below stay
-            // readable while the next request is in flight.
-            AnimatedVisibility(visible = isSearching) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = dimens.screenGutter)
-                        .height(2.dp),
-                    color = SpotKofiTheme.colors.accent,
-                    trackColor = Color.Transparent,
-                )
-            }
-
-            val current = results
+            val current = results?.takeIf { resultQuery == query.trim() }
             when {
                 query.trim().length < MinQueryLength ->
                     SearchLanding(
                         onCategoryClick = { query = it.title },
                     )
 
-                error != null && current == null -> Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(dimens.spaceXl),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(error!!, color = MaterialTheme.colorScheme.error)
-                }
+                error != null -> ErrorState(
+                    message = error.orEmpty(),
+                    onRetry = { retryNonce++ },
+                    modifier = Modifier.weight(1f),
+                )
 
-                current == null -> Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = SpotKofiTheme.colors.accent)
-                }
+                isSearching -> SearchSkeleton(modifier = Modifier.weight(1f))
+
+                current == null -> SearchSkeleton(modifier = Modifier.weight(1f))
 
                 else -> SearchResultsContent(
                     searchResults = current,
@@ -283,6 +266,7 @@ private fun SearchField(
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
+    val focusManager = LocalFocusManager.current
 
     BasicTextField(
         value = query,
@@ -297,9 +281,9 @@ private fun SearchField(
             keyboardType = KeyboardType.Text,
             imeAction = ImeAction.Search,
         ),
-        // Results already arrive while typing, so the IME action only needs to
-        // close the keyboard; there is nothing left to submit.
-        keyboardActions = KeyboardActions(onSearch = { }),
+        // Results arrive while typing, so the IME action confirms the query by
+        // closing the keyboard rather than launching a duplicate request.
+        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
         decorationBox = { innerTextField ->
             Row(
                 modifier = Modifier

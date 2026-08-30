@@ -192,6 +192,36 @@ class LocalMusicStore(context: Context) {
         }
     }
 
+    /**
+     * Clears user-owned library relations without touching listening history or
+     * downloaded audio. Track and collection snapshots are retained so downloads
+     * and history remain readable, but no library relation can recreate a saved
+     * or recently-added entry after the reset.
+     */
+    suspend fun clearLibraryData() = withContext(Dispatchers.IO) {
+        val db = helper.writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(TABLE_SAVED_TRACKS, null, null)
+            db.delete(TABLE_SAVED_COLLECTIONS, null, null)
+            db.delete(TABLE_VISITED, null, null)
+            db.delete(
+                TABLE_PLAYLIST_TRACKS,
+                "playlist_id LIKE ?",
+                arrayOf("$LOCAL_PLAYLIST_PREFIX%"),
+            )
+            db.delete(
+                TABLE_COLLECTIONS,
+                "type = ? AND id LIKE ?",
+                arrayOf(TYPE_PLAYLIST, "$LOCAL_PLAYLIST_PREFIX%"),
+            )
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        refreshAll()
+    }
+
     fun toggleCollection(collection: MediaCollection) {
         scope.launch {
             val db = helper.writableDatabase

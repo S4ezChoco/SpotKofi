@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,8 +57,12 @@ import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.ErrorState
+import com.spotkofi.app.ui.components.ExploreSkeleton
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.SectionHeader
+import com.spotkofi.app.ui.components.SkeletonBox
+import com.spotkofi.app.ui.components.SkeletonShelf
+import com.spotkofi.app.ui.components.SkeletonTrackRow
 import com.spotkofi.app.ui.components.TrackActionsSheetHost
 import com.spotkofi.app.ui.motion.clickableScale
 import com.spotkofi.app.ui.theme.Motion
@@ -152,12 +155,7 @@ fun ExploreScreen(
                     }
 
                 state.isLoading && state.chart == null && state.moodGroups.isEmpty() ->
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(color = colors.accent)
-                    }
+                    ExploreSkeleton(modifier = Modifier.fillMaxSize())
 
                 else -> ExploreContent(
                     state = state,
@@ -323,14 +321,15 @@ private fun ExploreContent(
 
         if (state.isLoadingCatalog && state.moodGroups.isEmpty()) {
             item(key = "catalog_loading") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = dimens.spaceXl),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(color = colors.accent)
-                }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = dimens.spaceLg),
+                verticalArrangement = Arrangement.spacedBy(dimens.spaceMd),
+            ) {
+                SkeletonShelf(gutter = dimens.screenGutter)
+                repeat(3) { SkeletonTrackRow() }
+            }
             }
         }
 
@@ -380,13 +379,10 @@ private fun RegionButton(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        // The spinner replaces the code in place, so a slow chart shows progress on
-        // the control that caused it rather than blanking the whole page.
         if (loading) {
-            CircularProgressIndicator(
-                color = colors.accent,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(14.dp),
+            SkeletonBox(
+                modifier = Modifier.size(width = 32.dp, height = 16.dp),
+                shape = SpotKofiTheme.shapes.chip,
             )
         } else {
             Text(
