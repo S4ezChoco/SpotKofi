@@ -20,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spotkofi.app.data.model.TrackLyrics
 import com.spotkofi.app.ui.motion.clickableScale
-import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlinx.coroutines.delay
 
@@ -120,9 +118,11 @@ fun LyricsView(
     }
 
     val listState = rememberLazyListState()
-    val activeIndex by remember(lines) {
-        derivedStateOf { activeLineIndex(lines, positionMs) }
-    }
+    // `positionMs` is a regular parameter, not Compose snapshot state. Keeping
+    // it inside a remembered derivedStateOf therefore freezes the active line at
+    // the value from the first composition. Recalculate from the live player
+    // position on every parent update so line changes and seeks are observable.
+    val activeIndex = activeLineIndex(lines, positionMs)
 
     // Auto-scroll yields to the user and then takes over again.
     val isDragged by listState.interactionSource.collectIsDraggedAsState()
@@ -288,29 +288,38 @@ fun activeLineIndex(lines: List<LyricLine>, positionMs: Long): Int {
  */
 fun parseSyncedLyrics(raw: String?): List<LyricLine> {
     if (raw.isNullOrBlank()) return emptyList()
-    val stamp = Regex("""\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?]""")
+    // Providers use both centiseconds and milliseconds, and some repeat a line
+    // with two timestamps. Keep every timestamp instead of silently discarding
+    // all but the first one.
+    val stamp = Regex("""\[(\d{1,3}):(\d{1,2})(?:[.:,](\d{1,3}))?]""")
+    val wordTimestamp = Regex("""<\d{1,3}:\d{1,2}(?:[.:,]\d{1,3})?>""")
 
-    return raw.lines().mapNotNull { line ->
-        val matches = stamp.findAll(line).toList()
-        if (matches.isEmpty()) return@mapNotNull null
-        val text = line.substring(matches.last().range.last + 1).trim()
-        if (text.isEmpty()) return@mapNotNull null
+    return raw.lines()
+        .flatMap { line ->
+            val matches = stamp.findAll(line).toList()
+            if (matches.isEmpty()) return@flatMap emptyList()
+            val text = line.substring(matches.last().range.last + 1)
+                .replace(wordTimestamp, "")
+                .trim()
+            if (text.isEmpty()) return@flatMap emptyList()
 
-        val match = matches.first()
-        val minutes = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
-        val seconds = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
-        val fraction = match.groupValues[3]
-        val fractionMs = when (fraction.length) {
-            0 -> 0L
-            1 -> fraction.toLong() * 100L
-            2 -> fraction.toLong() * 10L
-            else -> fraction.take(3).toLong()
+            matches.mapNotNull { match ->
+                val minutes = match.groupValues[1].toLongOrNull() ?: return@mapNotNull null
+                val seconds = match.groupValues[2].toLongOrNull() ?: return@mapNotNull null
+                val fraction = match.groupValues[3]
+                val fractionMs = when (fraction.length) {
+                    0 -> 0L
+                    1 -> fraction.toLong() * 100L
+                    2 -> fraction.toLong() * 10L
+                    else -> fraction.take(3).toLong()
+                }
+                LyricLine(
+                    timestampMs = minutes * 60_000L + seconds * 1_000L + fractionMs,
+                    text = text,
+                )
+            }
         }
-        LyricLine(
-            timestampMs = minutes * 60_000L + seconds * 1_000L + fractionMs,
-            text = text,
-        )
-    }.sortedBy { it.timestampMs }
+        .sortedBy { it.timestampMs }
 }
 
 /** True when the sheet carries timings, which is what enables sync and seeking. */

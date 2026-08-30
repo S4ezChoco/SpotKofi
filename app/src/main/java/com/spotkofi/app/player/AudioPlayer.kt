@@ -326,6 +326,9 @@ class AudioPlayer(
         const val MAX_BUFFER_MS = 60_000
         const val BUFFER_FOR_PLAYBACK_MS = 1_500
         const val BUFFER_FOR_REBUFFER_MS = 5_000
-        const val PROGRESS_INTERVAL_MS = 250L
+        // 250 ms made a lyric boundary visibly late. This cadence keeps the
+        // player progress and synced-line highlighting responsive without using
+        // a per-frame busy loop.
+        const val PROGRESS_INTERVAL_MS = 100L
     }
 }

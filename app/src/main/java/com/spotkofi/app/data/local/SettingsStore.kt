@@ -12,21 +12,41 @@ enum class LyricsProvider(
     val displayName: String,
     val description: String,
 ) {
+    Automatic(
+        key = "automatic",
+        displayName = "Automatic",
+        description = "Tries synced sources and falls back safely",
+    ),
+    SimpMusic(
+        key = "simpmusic",
+        displayName = "SimpMusic",
+        description = "Video-matched community lyrics",
+    ),
     LrcLib(
         key = "lrclib",
         displayName = "LRCLIB",
-        description = "Synced lyrics when the catalog has them",
+        description = "Synced lyrics matched by song and duration",
+    ),
+    BetterLyrics(
+        key = "better_lyrics",
+        displayName = "Better Lyrics",
+        description = "Timed TTML lyrics with a plain-line fallback",
+    ),
+    YouTubeCaptions(
+        key = "youtube_captions",
+        displayName = "YouTube captions",
+        description = "Timed captions from the matching video",
     ),
     LyricsOvh(
         key = "lyrics_ovh",
         displayName = "Lyrics.ovh",
-        description = "A second source for plain lyrics",
+        description = "Plain lyrics when timed sources are unavailable",
     ),
     ;
 
     companion object {
         fun fromKey(value: String?): LyricsProvider =
-            entries.firstOrNull { it.key == value } ?: LrcLib
+            entries.firstOrNull { it.key == value } ?: Automatic
     }
 }
 
@@ -60,8 +80,8 @@ data class AppSettings(
     // ---- Lyrics ----
     /** Look up lyrics for the playing track. */
     val lyricsEnabled: Boolean = true,
-    /** Provider used for the next track-details request. */
-    val lyricsProvider: LyricsProvider = LyricsProvider.LrcLib,
+    /** First provider used for the next track-details request; failures fall through. */
+    val lyricsProvider: LyricsProvider = LyricsProvider.Automatic,
 
     // ---- Downloads ----
     /** Preferred download ordering when several are queued. */

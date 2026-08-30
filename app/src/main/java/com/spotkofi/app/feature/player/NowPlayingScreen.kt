@@ -1,12 +1,15 @@
 package com.spotkofi.app.feature.player
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -231,6 +235,17 @@ private fun NowPlayingContent(
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showCredits by remember { mutableStateOf(false) }
+    // Direction is updated before the queue changes, so AnimatedContent can move
+    // the outgoing artwork left for Next and right for Previous.
+    var artworkSwipeDirection by remember { mutableStateOf(1) }
+    val playNextWithAnimation = {
+        artworkSwipeDirection = 1
+        onNext()
+    }
+    val playPreviousWithAnimation = {
+        artworkSwipeDirection = -1
+        onPrevious()
+    }
     val context = LocalContext.current
     // Hand-off intents are built here rather than in the sheet so the sheet stays
     // a dumb list of rows and can be previewed without a real Context.
@@ -273,11 +288,12 @@ private fun NowPlayingContent(
                     HeroArtwork(
                         track = track,
                         contextLabel = "Now Playing",
+                        swipeDirection = artworkSwipeDirection,
                         onCollapse = onCollapse,
                         onDrag = onDrag,
                         onDragStopped = onDragStopped,
                         onSwipeHorizontal = { delta ->
-                            if (delta < 0f) onNext() else onPrevious()
+                            if (delta < 0f) playNextWithAnimation() else playPreviousWithAnimation()
                         },
                         onMoreOptions = { showOptions = true },
                     )
@@ -309,8 +325,8 @@ private fun NowPlayingContent(
                     TransportRow(
                         state = state,
                         onTogglePlayPause = onTogglePlayPause,
-                        onNext = onNext,
-                        onPrevious = onPrevious,
+                        onNext = playNextWithAnimation,
+                        onPrevious = playPreviousWithAnimation,
                         onToggleShuffle = onToggleShuffle,
                         onCycleRepeat = onCycleRepeat,
                     )
@@ -320,7 +336,6 @@ private fun NowPlayingContent(
                         canShare = track.isExternallyOpenable,
                         onShare = { shareTrack(track) },
                         onShowQueue = { showQueue = true },
-                        onMoreOptions = { showOptions = true },
                     )
                     Spacer(Modifier.height(dimens.spaceXl))
                 }
@@ -486,19 +501,19 @@ private fun NowPlayingContent(
 private fun HeroArtwork(
     track: Track,
     contextLabel: String,
+    swipeDirection: Int,
     onCollapse: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
     onSwipeHorizontal: (Float) -> Unit,
     onMoreOptions: () -> Unit,
 ) {
-    val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = dimens.spaceXl, vertical = dimens.spaceSm)
+            .padding(horizontal = dimens.spaceXl, vertical = dimens.spaceMd)
             .aspectRatio(1f)
             .clip(RoundedCornerShape(24.dp))
             .pointerInput(Unit) {
@@ -528,12 +543,32 @@ private fun HeroArtwork(
                 )
             },
     ) {
-        Artwork(
-            id = track.id,
-            url = track.artworkUrl,
-            shape = RoundedCornerShape(24.dp),
+        AnimatedContent(
+            targetState = track,
+            transitionSpec = {
+                val direction = if (swipeDirection >= 0) 1 else -1
+                (
+                    slideInHorizontally(
+                        animationSpec = tween(Motion.Medium),
+                        initialOffsetX = { width -> direction * width },
+                    ) + fadeIn(tween(Motion.Fast))
+                ) togetherWith (
+                    slideOutHorizontally(
+                        animationSpec = tween(Motion.Medium),
+                        targetOffsetX = { width -> -direction * width },
+                    ) + fadeOut(tween(Motion.Fast))
+                )
+            },
+            label = "artworkSwipe",
             modifier = Modifier.fillMaxSize(),
-        )
+        ) { animatedTrack ->
+            Artwork(
+                id = animatedTrack.id,
+                url = animatedTrack.artworkUrl,
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         // Scrims: one under the top bar, one behind the lyric line, so both stay
         // legible whatever the artwork is.
@@ -554,7 +589,10 @@ private fun HeroArtwork(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = dimens.spaceXs),
+                // Keep the back/menu icons clear of the artwork edge and the
+                // status-bar cutout; the reference gives this row a visible top
+                // breathing space instead of pinning it to the first pixel.
+                .padding(top = dimens.spaceSm, start = dimens.spaceXs, end = dimens.spaceXs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onCollapse) {
@@ -582,20 +620,6 @@ private fun HeroArtwork(
             }
         }
 
-        // Artwork remains visible while the official YouTube app or browser owns
-        // playback. No lyrics or protected media are scraped by this app.
-        if (track.albumTitle.isNotBlank()) {
-            Text(
-                text = track.albumTitle,
-                style = MaterialTheme.typography.headlineSmall,
-                color = colors.textPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(dimens.spaceXl),
-            )
-        }
     }
 }
 
@@ -652,32 +676,59 @@ private fun Scrubber(
 ) {
     val colors = SpotKofiTheme.colors
 
-    // Local scrub position so the thumb follows the finger instead of being
-    // yanked back by the 500ms playhead tick mid-drag.
+    // Keep the touch target generous while drawing only the slim 3 dp track used
+    // by the reference. The transparent Slider remains responsible for accurate
+    // tap/drag seeking, so this visual change does not remove interaction.
     var scrubbing by remember { mutableStateOf(false) }
     var scrubFraction by remember { mutableFloatStateOf(0f) }
-    val fraction = if (scrubbing) scrubFraction else state.progress
+    val targetFraction = if (scrubbing) scrubFraction else state.progress
+    val fraction by animateFloatAsState(
+        targetValue = targetFraction.coerceIn(0f, 1f),
+        animationSpec = tween(120),
+        label = "scrubberProgress",
+    )
 
     Column {
-        Slider(
-            value = fraction,
-            onValueChange = {
-                scrubbing = true
-                scrubFraction = it
-            },
-            onValueChangeFinished = {
-                onSeek(scrubFraction)
-                scrubbing = false
-            },
-            colors = SliderDefaults.colors(
-                thumbColor = colors.textPrimary,
-                activeTrackColor = colors.textPrimary,
-                inactiveTrackColor = colors.trackInactive,
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(SpotKofiTheme.shapes.chip)
+                    .background(colors.trackInactive),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .fillMaxHeight()
+                        .background(colors.textPrimary),
+                )
+            }
+            Slider(
+                value = targetFraction.coerceIn(0f, 1f),
+                onValueChange = {
+                    scrubbing = true
+                    scrubFraction = it
+                },
+                onValueChangeFinished = {
+                    onSeek(scrubFraction)
+                    scrubbing = false
+                },
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.Transparent,
+                    activeTrackColor = Color.Transparent,
+                    inactiveTrackColor = Color.Transparent,
+                ),
+                modifier = Modifier.fillMaxWidth().height(24.dp),
+            )
+        }
         val durationMs = state.effectiveDurationMs
-        val elapsedMs = (durationMs * fraction).toLong()
+        val elapsedMs = (durationMs * targetFraction.coerceIn(0f, 1f)).toLong()
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = elapsedMs.asTrackDuration(),
@@ -685,10 +736,6 @@ private fun Scrubber(
                 color = colors.textSecondary,
             )
             Spacer(Modifier.weight(1f))
-            // Time remaining rather than total length. During a scrub this counts
-            // down from the dragged position, so it answers "when does this end"
-            // for the place the finger is, which is the question the seek bar is
-            // actually being used to ask.
             Text(
                 text = "-" + (durationMs - elapsedMs).coerceAtLeast(0L).asTrackDuration(),
                 style = MaterialTheme.typography.bodySmall,
@@ -811,7 +858,6 @@ private fun SecondaryRow(
     canShare: Boolean,
     onShare: () -> Unit,
     onShowQueue: () -> Unit,
-    onMoreOptions: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -851,14 +897,6 @@ private fun SecondaryRow(
                 )
             }
             Spacer(Modifier.width(dimens.spaceSm))
-        }
-        IconButton(onClick = onMoreOptions) {
-            Icon(
-                imageVector = Icons.Filled.MoreVert,
-                contentDescription = stringResource(R.string.cd_more_options),
-                tint = colors.textSecondary,
-                modifier = Modifier.size(dimens.iconMd),
-            )
         }
     }
 }

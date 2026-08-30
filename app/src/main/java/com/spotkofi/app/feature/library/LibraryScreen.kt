@@ -168,7 +168,11 @@ fun LibraryScreen(
     CompositionLocalProvider(
         LocalContentColor provides MaterialTheme.colorScheme.onBackground,
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(SpotKofiTheme.colors.base),
+        ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = contentPadding,

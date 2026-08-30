@@ -96,7 +96,11 @@ fun HomeScreen(
     // do a linear search for every visible track.
     val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
 
-    androidx.compose.foundation.layout.Box(modifier = modifier.fillMaxSize()) {
+    androidx.compose.foundation.layout.Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(SpotKofiTheme.colors.base),
+    ) {
         PullToRefreshBox(
             isRefreshing = state.isRefreshing,
             onRefresh = viewModel::refresh,

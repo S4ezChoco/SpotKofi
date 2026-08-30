@@ -96,7 +96,11 @@ fun CollectionScreen(
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
     val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(SpotKofiTheme.colors.base),
+    ) {
         CollectionContent(
             state = state,
             downloads = downloadsByTrack,

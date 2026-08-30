@@ -175,6 +175,7 @@ fun SearchScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(SpotKofiTheme.colors.base)
                 .padding(contentPadding),
         ) {
             SearchHeader(userName = userName, onOpenProfile = onOpenProfile)

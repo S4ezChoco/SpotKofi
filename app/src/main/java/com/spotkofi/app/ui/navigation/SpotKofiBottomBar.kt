@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -56,23 +57,31 @@ fun SpotKofiBottomBar(
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
-    Row(
+    // The outer Box owns the background all the way through the system inset.
+    // Applying navigationBarsPadding to the same bottom-aligned surface made the
+    // bar look like a floating card with a dark gap below it.
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .background(colors.base)
-            .heightIn(min = dimens.floatingBarHeight)
-            .padding(horizontal = dimens.spaceLg),
-        horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(colors.base),
     ) {
-        TopLevelDestination.entries.forEach { destination ->
-            NavItem(
-                destination = destination,
-                selected = destination == current,
-                onClick = { onSelect(destination) },
-                modifier = Modifier.weight(1f),
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .heightIn(min = dimens.floatingBarHeight)
+                .padding(horizontal = dimens.spaceLg),
+            horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TopLevelDestination.entries.forEach { destination ->
+                NavItem(
+                    destination = destination,
+                    selected = destination == current,
+                    onClick = { onSelect(destination) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }

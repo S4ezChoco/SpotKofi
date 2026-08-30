@@ -1,14 +1,17 @@
 package com.spotkofi.app.data.remote
 
+import com.spotkofi.app.core.AppConstants
 import com.spotkofi.app.data.model.TrackCredits
 import com.spotkofi.app.data.remote.Innertube.string
 import com.spotkofi.app.data.remote.Innertube.walkObjects
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import okhttp3.OkHttpClient
+import okhttp3.Request
 
 /**
  * Per-song information published alongside a recording.
@@ -26,20 +29,9 @@ internal class YouTubeSongInfoClient(
     suspend fun credits(videoId: String): TrackCredits? = withContext(Dispatchers.IO) {
         if (videoId.isBlank()) return@withContext null
 
-        val body = buildJsonObject {
-            put("context", Innertube.json.parseToJsonElement(CONTEXT_BODY))
-            put("videoId", JsonPrimitive(videoId))
-            // Without these the endpoint refuses age-gated and region-flagged items
-            // outright, and the panel would be empty for exactly the songs whose
-            // details are most worth showing.
-            put("contentCheckOk", JsonPrimitive(true))
-            put("racyCheckOk", JsonPrimitive(true))
-        }.toString()
-
-        val response = Innertube.post(client, PLAYER_ENDPOINT, body) ?: return@withContext null
-        val root = runCatching {
-            Innertube.json.parseToJsonElement(response) as? JsonObject
-        }.getOrNull() ?: return@withContext null
+        val response = Innertube.post(client, PLAYER_ENDPOINT, playerBody(videoId))
+            ?: return@withContext null
+        val root = parseRoot(response) ?: return@withContext null
 
         val details = root.walkObjects()
             .firstOrNull { it.containsKey("videoDetails") }
@@ -70,6 +62,75 @@ internal class YouTubeSongInfoClient(
             description = description,
         )
     }
+
+    /**
+     * Fetches the first usable YouTube caption track. The raw transcript is kept
+     * as XML because the lyrics layer also understands the provider timestamps
+     * and can turn them into the same LRC model as every other source.
+     */
+    suspend fun captions(
+        videoId: String,
+        preferredLanguage: String = "en",
+    ): String? = withContext(Dispatchers.IO) {
+        if (videoId.isBlank()) return@withContext null
+
+        val response = Innertube.post(client, PLAYER_ENDPOINT, playerBody(videoId))
+            ?: return@withContext null
+        val root = parseRoot(response) ?: return@withContext null
+        val renderer = root.walkObjects()
+            .mapNotNull { it["playerCaptionsTracklistRenderer"] as? JsonObject }
+            .firstOrNull()
+            ?: return@withContext null
+        val tracks = renderer["captionTracks"] as? JsonArray ?: return@withContext null
+
+        data class CaptionTrack(
+            val url: String,
+            val languageCode: String?,
+            val kind: String?,
+        )
+
+        val candidates = tracks.mapNotNull { element ->
+            val track = element as? JsonObject ?: return@mapNotNull null
+            CaptionTrack(
+                url = track.string("baseUrl") ?: return@mapNotNull null,
+                languageCode = track.string("languageCode"),
+                kind = track.string("kind"),
+            )
+        }
+        val preferred = preferredLanguage.trim().lowercase()
+        val selected = candidates.minByOrNull { track ->
+            when {
+                track.languageCode.equals(preferred, ignoreCase = true) -> 0
+                track.languageCode?.lowercase()?.startsWith("$preferred-") == true -> 1
+                track.kind == "asr" -> 3
+                else -> 2
+            }
+        } ?: return@withContext null
+
+        val request = Request.Builder()
+            .url(selected.url)
+            .header("Accept", "text/xml, application/xml, application/json")
+            .header("User-Agent", AppConstants.USER_AGENT)
+            .build()
+        runCatching {
+            client.newCall(request).execute().use { captionResponse ->
+                if (!captionResponse.isSuccessful) null else captionResponse.body.string()
+            }
+        }.getOrNull()
+    }
+
+    private fun parseRoot(response: String): JsonObject? = runCatching {
+        Innertube.json.parseToJsonElement(response) as? JsonObject
+    }.getOrNull()
+
+    private fun playerBody(videoId: String): String = buildJsonObject {
+        put("context", Innertube.json.parseToJsonElement(CONTEXT_BODY))
+        put("videoId", JsonPrimitive(videoId))
+        // Without these the endpoint refuses age-gated and region-flagged items
+        // outright, and both metadata and captions disappear for those songs.
+        put("contentCheckOk", JsonPrimitive(true))
+        put("racyCheckOk", JsonPrimitive(true))
+    }.toString()
 
     private companion object {
         const val PLAYER_ENDPOINT = "https://music.youtube.com/youtubei/v1/player"

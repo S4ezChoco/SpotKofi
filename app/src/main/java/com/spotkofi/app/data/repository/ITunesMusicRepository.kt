@@ -388,6 +388,7 @@ class ItunesMusicRepository internal constructor(
                     artistName = track.artistName,
                     albumTitle = track.albumTitle,
                     durationMs = track.durationMs,
+                    videoId = track.videoId,
                     provider = lyricsProvider,
                 )
             }

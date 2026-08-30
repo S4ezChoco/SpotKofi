@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -40,6 +41,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Text
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -310,16 +313,27 @@ fun SpotKofiApp(
                             // hard edge. Timings come from Motion rather than being
                             // invented here.
                             enterTransition = {
-                                fadeIn(tween(Motion.Medium, easing = Motion.Emphasized)) +
-                                    slideInVertically(
-                                        tween(Motion.Medium, easing = Motion.Emphasized),
-                                    ) { height -> height / 22 }
+                                if (isTabSwitch()) {
+                                    // The destination roots are opaque, so a short
+                                    // fade is safe; do not combine it with the
+                                    // outgoing collection slide.
+                                    fadeIn(tween(Motion.Fast, easing = Motion.Standard))
+                                } else {
+                                    fadeIn(tween(Motion.Medium, easing = Motion.Emphasized)) +
+                                        slideInVertically(
+                                            tween(Motion.Medium, easing = Motion.Emphasized),
+                                        ) { height -> height / 22 }
+                                }
                             },
                             exitTransition = {
-                                fadeOut(tween(Motion.Fast, easing = Motion.Standard)) +
-                                    slideOutVertically(
-                                        tween(Motion.Fast, easing = Motion.Standard),
-                                    ) { height -> -height / 40 }
+                                if (isTabSwitch()) {
+                                    ExitTransition.None
+                                } else {
+                                    fadeOut(tween(Motion.Fast, easing = Motion.Standard)) +
+                                        slideOutVertically(
+                                            tween(Motion.Fast, easing = Motion.Standard),
+                                        ) { height -> -height / 40 }
+                                }
                             },
                             // Nothing at all on the way back. On a pop the screen
                             // underneath was never gone, so animating it in makes it
@@ -595,6 +609,26 @@ private fun NavHostController.popToTabRoot(destination: TopLevelDestination) {
 }
 
 /**
+ * A tab switch is not a detail push. Navigation Compose otherwise lets the
+ * outgoing collection transition win, so an album can slide away while the new
+ * tab fades in over a transparent-looking frame. The graph hierarchy gives us a
+ * stable way to distinguish that case without inspecting generated route names.
+ */
+private fun NavDestination.topLevelTab(): TopLevelDestination? = when {
+    hierarchy.any { it.hasRoute(HomeGraph::class) } -> TopLevelDestination.Home
+    hierarchy.any { it.hasRoute(SearchGraph::class) } -> TopLevelDestination.Search
+    hierarchy.any { it.hasRoute(LibraryGraph::class) } -> TopLevelDestination.Library
+    else -> null
+}
+
+private fun androidx.compose.animation.AnimatedContentTransitionScope<NavBackStackEntry>
+    .isTabSwitch(): Boolean {
+    val from = initialState.destination.topLevelTab()
+    val to = targetState.destination.topLevelTab()
+    return from != null && to != null && from != to
+}
+
+/**
  * The collection detail destination, registered once per tab graph.
  *
  * Declared as an extension rather than copied three times so the push and pop
@@ -608,13 +642,20 @@ private fun NavGraphBuilder.collectionDestination(
     // the same way. The direction is what tells the user which way back is.
     composable<CollectionRoute>(
         enterTransition = {
-            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { it }
+            if (isTabSwitch()) {
+                EnterTransition.None
+            } else {
+                slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { it }
+            }
         },
-        // The outgoing screen drifts a fraction of the way left instead of fading.
-        // That parallax is what makes the detail read as sitting on top of the tab
-        // rather than replacing it, and it costs no legibility.
+        // A tab change is a replacement, not a detail push. Let the destination
+        // root own the frame so the collection cannot expose a transparent seam.
         exitTransition = {
-            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+            if (isTabSwitch()) {
+                ExitTransition.None
+            } else {
+                slideOutHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+            }
         },
         popEnterTransition = {
             slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
