@@ -205,18 +205,20 @@ internal class YouTubeMusicBrowseClient(
             YouTubeIds.Kind.Album -> Album(
                 id = id,
                 title = title,
-                artistName = subtitleValues.firstOrNull { it.toIntOrNull() == null }.orEmpty(),
+                artistName = subtitleValues.firstOrNull { it.isPersonOrArtistName() }.orEmpty(),
                 year = subtitleValues.firstNotNullOfOrNull { value ->
                     value.trim().toIntOrNull()?.takeIf { it in 1900..2100 }
                 },
+                trackCount = subtitleValues.firstNotNullOfOrNull { it.toTrackCount() } ?: 0,
                 artworkUrl = artwork,
             )
 
             YouTubeIds.Kind.Playlist -> Playlist(
                 id = id,
                 title = title,
-                description = subtitleValues.firstOrNull().orEmpty(),
-                ownerName = subtitleValues.firstOrNull().orEmpty().ifEmpty { "YouTube Music" },
+                // The header subtitle is owner/type metadata, not a description.
+                description = root.headerDescription().orEmpty(),
+                ownerName = subtitleValues.firstOrNull { it.isPersonOrArtistName() }.orEmpty(),
                 artworkUrl = artwork,
             )
         }
@@ -290,6 +292,15 @@ internal class YouTubeMusicBrowseClient(
         }
         .firstOrNull()
         ?: thumbnailUrl()
+
+    private fun JsonObject.headerDescription(): String? = walkObjects()
+        .mapNotNull { candidate ->
+            (candidate["musicDetailHeaderRenderer"] as? JsonObject)?.get("description").runText()
+                ?: (candidate["musicResponsiveHeaderRenderer"] as? JsonObject)
+                    ?.get("description")
+                    .runText()
+        }
+        .firstOrNull { it.isNotBlank() }
 
     private fun JsonObject.headerSubtitles(): List<String> = walkObjects()
         .mapNotNull { candidate ->
@@ -371,18 +382,19 @@ internal class YouTubeMusicBrowseClient(
                 Innertube.PAGE_TYPE_ALBUM -> Album(
                     id = YouTubeIds.album(browse),
                     title = title,
-                    artistName = subtitle.firstOrNull { it.toIntOrNull() == null }.orEmpty(),
+                    artistName = subtitle.firstOrNull { it.isPersonOrArtistName() }.orEmpty(),
                     year = subtitle.firstNotNullOfOrNull { value ->
                         value.trim().toIntOrNull()?.takeIf { it in 1900..2100 }
                     },
+                    trackCount = subtitle.firstNotNullOfOrNull { it.toTrackCount() } ?: 0,
                     artworkUrl = renderer.thumbnailUrl(),
                 )
 
                 Innertube.PAGE_TYPE_PLAYLIST -> Playlist(
                     id = YouTubeIds.playlist(browse),
                     title = title,
-                    description = subtitle.firstOrNull().orEmpty(),
-                    ownerName = subtitle.firstOrNull().orEmpty().ifEmpty { "YouTube Music" },
+                    description = "",
+                    ownerName = subtitle.firstOrNull { it.isPersonOrArtistName() }.orEmpty(),
                     artworkUrl = renderer.thumbnailUrl(),
                 )
 
@@ -403,6 +415,20 @@ internal class YouTubeMusicBrowseClient(
             ?: this["subtitle"].runObjects()
         return runs.mapNotNull { it.string("text")?.trim() }.filter { isMeaningful(it) }
     }
+
+    private fun String.toTrackCount(): Int? {
+        val parts = trim().split(' ').filter { it.isNotBlank() }
+        val count = parts.firstOrNull()?.toIntOrNull() ?: return null
+        val label = parts.drop(1).joinToString(" ").lowercase()
+        return count.takeIf { it > 0 && (label == "song" || label == "songs" || label == "track" || label == "tracks") }
+    }
+
+    private fun String.isPersonOrArtistName(): Boolean =
+        isNotBlank() && trim().toIntOrNull()?.let { it in 1900..2100 } != true &&
+            toTrackCount() == null &&
+            !contains("album", ignoreCase = true) &&
+            !contains("playlist", ignoreCase = true) &&
+            !equals("YouTube Music", ignoreCase = true)
 
     private companion object {
         const val MAX_CHART_SONGS = 30

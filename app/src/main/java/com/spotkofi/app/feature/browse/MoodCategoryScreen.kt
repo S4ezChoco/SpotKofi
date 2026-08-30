@@ -71,7 +71,7 @@ fun MoodCategoryScreen(
         )
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val playingTrackId by viewModel.playingTrackId.collectAsStateWithLifecycle(initialValue = null)
     val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
 
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
@@ -188,7 +188,7 @@ fun MoodCategoryScreen(
                             val download = downloadsByTrack[track.id]
                             TrackRow(
                                 track = track,
-                                isPlaying = track.id == playback.track?.id,
+                                isPlaying = track.id == playingTrackId,
                                 downloadStatus = download?.status,
                                 downloadProgress = download?.progress ?: 0,
                                 onClick = { viewModel.onPlayTrack(track, state.songs) },

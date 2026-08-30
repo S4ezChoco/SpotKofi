@@ -1,6 +1,7 @@
 package com.spotkofi.app.data.remote
 
 import android.util.Log
+import com.spotkofi.app.data.local.AudioQuality
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
 import com.spotkofi.app.data.model.MediaCollection
@@ -111,7 +112,10 @@ class YouTubeMusicClient {
      * NOTE: The API key needs to be extracted from YouTube Music's player HTML.
      * For now, we use the player API which returns streaming data.
      */
-    suspend fun getStreamUrl(trackId: String): String? {
+    suspend fun getStreamUrl(
+        trackId: String,
+        quality: AudioQuality = AudioQuality.Automatic,
+    ): String? {
         // YouTube Music uses videoId for tracks (e.g., "dQw4w9WgXcQ")
         // The trackId should be the YouTube video ID
         
@@ -161,7 +165,7 @@ class YouTubeMusicClient {
             if (response.isSuccessful) {
                 val responseText = response.body.string()
                 // Parse the response to extract streaming URLs
-                extractStreamUrlFromPlayerResponse(responseText)
+                extractStreamUrlFromPlayerResponse(responseText, quality)
             } else {
                 null
             }
@@ -175,16 +179,41 @@ class YouTubeMusicClient {
      * Extract stream URL from YouTube Music player response
      * The response contains streamingData with formats and adaptiveFormats
      */
-    private fun extractStreamUrlFromPlayerResponse(responseText: String): String? {
-        // This is a simplified parser - in production use a proper JSON parser
-        // Parse the streamingData.adaptiveFormats to find an audio URL
-        
-        // Look for the URL field in the streamingData
-        val urlPattern = "\"url\":\"([^\"]+)\"".toRegex()
-        val matches = urlPattern.findAll(responseText)
-        
-        // Return the first URL found (usually the audio stream)
-        return matches.firstOrNull()?.groupValues?.getOrNull(1)
+    private fun extractStreamUrlFromPlayerResponse(
+        responseText: String,
+        quality: AudioQuality,
+    ): String? {
+        val root = runCatching {
+            json.parseToJsonElement(responseText) as? kotlinx.serialization.json.JsonObject
+        }.getOrNull() ?: return null
+        val formats = (
+            (root["streamingData"] as? kotlinx.serialization.json.JsonObject)
+                ?.get("adaptiveFormats") as? kotlinx.serialization.json.JsonArray
+            ).orEmpty()
+
+        data class Candidate(val url: String, val bitrate: Int)
+        val candidates = formats.mapNotNull { element ->
+            val format = element as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+            val mimeType = format["mimeType"]?.toString().orEmpty()
+            if (!mimeType.contains("audio/", ignoreCase = true)) return@mapNotNull null
+            val rawUrl = format["url"]?.toString()
+                ?.removeSurrounding("\"")
+                ?.replace("\\u0026", "&")
+                ?.replace("\\/", "/")
+                ?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            Candidate(
+                url = rawUrl,
+                bitrate = format["bitrate"]?.toString()?.toIntOrNull() ?: 0,
+            )
+        }
+        val selected = when (quality) {
+            AudioQuality.Low -> candidates.minByOrNull { it.bitrate }
+            AudioQuality.High,
+            AudioQuality.Automatic,
+            -> candidates.maxByOrNull { it.bitrate }
+        }
+        return selected?.url
     }
     
     /**

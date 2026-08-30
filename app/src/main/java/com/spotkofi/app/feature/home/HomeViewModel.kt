@@ -20,6 +20,7 @@ import com.spotkofi.app.player.PlayerController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -124,6 +125,9 @@ class HomeViewModel(
 
     /** Pull-to-refresh reloads every Home shelf, including region-sensitive data. */
     fun refresh() {
+        // A second finger drag must not cancel the first refresh and leave the
+        // screen with an old result while the indicator has already disappeared.
+        if (_uiState.value.isRefreshing) return
         repository.invalidateHomeCache()
         load(refreshing = true)
     }
@@ -139,17 +143,14 @@ class HomeViewModel(
         val isRegionReload = regionOverride != null && !refreshing
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
+            val refreshStartedAt = if (refreshing) System.currentTimeMillis() else 0L
             _uiState.update {
                 it.copy(
                     regionCode = region,
-                    // Region changes keep the old feed visible while the chart and
-                    // region shelves refresh in place. Initial loads still use the
-                    // full-page skeleton.
-                    isLoading = if (refreshing || isRegionReload) {
-                        it.isLoading
-                    } else {
-                        true
-                    },
+                    // User refreshes intentionally replace the stale feed with the
+                    // same shaped skeleton as the initial load. Keeping old cards
+                    // underneath made a completed refresh look like no refresh at all.
+                    isLoading = if (isRegionReload) it.isLoading else true,
                     isRefreshing = refreshing,
                     isRegionLoading = isRegionReload,
                     error = null,
@@ -160,37 +161,42 @@ class HomeViewModel(
             try {
                 supervisorScope {
                     val picks = async {
-                        runCatching { repository.quickPicks() }
-                            .getOrDefault(remoteQuickPicks)
+                        loadOrNull { repository.quickPicks() }
                     }
                     val sections = async {
-                        runCatching { repository.homeSections(HomeTab.All) }
-                            .getOrDefault(remoteSections)
+                        loadOrNull { repository.homeSections(HomeTab.All) }
                     }
                     val trending = async {
-                        runCatching { repository.trendingPlaylists(region) }
-                            .getOrDefault(emptyList())
+                        loadOrNull { repository.trendingPlaylists(region) }
                     }
                     val releases = async {
-                        runCatching { repository.newReleases() }.getOrDefault(emptyList())
+                        loadOrNull { repository.newReleases() }
                     }
                     val moods = async {
-                        runCatching { repository.moodsAndGenres() }.getOrDefault(emptyList())
+                        loadOrNull { repository.moodsAndGenres() }
                     }
                     val chart = async {
-                        runCatching { repository.chart(region) }.getOrNull()
+                        loadOrNull { repository.chart(region) }
                     }
 
-                    val loadedPicks = picks.await()
-                    val loadedSections = sections.await()
-                    val loadedTrending = trending.await()
-                    val loadedReleases = releases.await()
-                    val loadedMoods = moods.await()
+                    val loadedPicks = picks.await() ?: remoteQuickPicks
+                    val loadedSections = sections.await() ?: remoteSections
+                    val loadedTrending = trending.await().orEmpty()
+                    val loadedReleases = releases.await().orEmpty()
+                    val loadedMoods = moods.await().orEmpty()
                     val loadedChart = chart.await()
 
                     remoteQuickPicks = loadedPicks
                     remoteSections = loadedSections
                     val history = localStore?.history?.value.orEmpty()
+                    if (refreshing) {
+                        val remaining = REFRESH_SKELETON_MS -
+                            (System.currentTimeMillis() - refreshStartedAt)
+                        if (remaining > 0L) delay(remaining)
+                    }
+                    val hasContent = loadedPicks.isNotEmpty() || loadedSections.isNotEmpty() ||
+                        loadedTrending.isNotEmpty() || loadedReleases.isNotEmpty() ||
+                        loadedMoods.isNotEmpty() || loadedChart != null || history.isNotEmpty()
 
                     _uiState.update {
                         it.copy(
@@ -203,6 +209,11 @@ class HomeViewModel(
                             isLoading = false,
                             isRefreshing = false,
                             isRegionLoading = false,
+                            error = if (!hasContent) {
+                                "Could not load Home right now. Pull to try again."
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -219,6 +230,14 @@ class HomeViewModel(
                 }
             }
         }
+    }
+
+    private suspend fun <T> loadOrNull(block: suspend () -> T): T? = try {
+        block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 
     private fun updateLocalHistory(history: List<Track>) {
@@ -349,4 +368,8 @@ class HomeViewModel(
     }
 
     val playbackState: StateFlow<PlaybackState> = player.state
+
+    private companion object {
+        const val REFRESH_SKELETON_MS = 850L
+    }
 }

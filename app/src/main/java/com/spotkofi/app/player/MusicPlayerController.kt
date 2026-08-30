@@ -8,6 +8,7 @@ import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.datasource.DataSource
 import com.spotkofi.app.data.local.AppSettings
+import com.spotkofi.app.data.local.AudioQuality
 import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.PlaybackStatus
@@ -112,6 +113,7 @@ class MusicPlayerController(
     private var currentTrackIndex = 0
     private var playbackIntent = false
     private var currentVideoId: String? = null
+    private var currentStreamQuality: AudioQuality? = null
     private var released = false
 
     /**
@@ -199,7 +201,14 @@ class MusicPlayerController(
 
         audioPlayer.setOnPlaybackError { error ->
             if (!released) {
-                currentVideoId?.let(streamUrlCache::remove)
+                currentVideoId?.let { videoId ->
+                    streamUrlCache.remove(
+                        streamCacheKey(
+                            videoId,
+                            currentStreamQuality ?: settingsProvider().audioQuality,
+                        ),
+                    )
+                }
                 playbackIntent = false
                 _state.update { it.copy(isPlaying = false, status = PlaybackStatus.Error, error = error) }
             }
@@ -530,6 +539,7 @@ class MusicPlayerController(
         activePlaybackJob = null
         playbackIntent = false
         currentVideoId = null
+        currentStreamQuality = null
         streamUrlCache.clear()
         audioPlayer.release()
         coroutineScope.cancel()
@@ -542,6 +552,7 @@ class MusicPlayerController(
         val generation = ++playbackGeneration
         audioPlayer.stop()
         currentVideoId = track.videoId?.trim()?.takeIf { it.isNotEmpty() }
+        currentStreamQuality = null
         _state.update {
             it.copy(
                 track = track,
@@ -592,16 +603,18 @@ class MusicPlayerController(
 
             resolved.videoId?.let { videoId ->
                 currentVideoId = videoId
-                cacheStreamUrl(videoId, resolved.url)
+                currentStreamQuality = resolved.quality
+                cacheStreamUrl(videoId, resolved.url, resolved.quality)
             } ?: run {
                 // A file URI is already the durable offline source; it has no
                 // remote video identity and must not inherit one from the track.
                 currentVideoId = null
+                currentStreamQuality = null
             }
             audioPlayer.play(
                 resolved.url,
                 autoPlay = playbackIntent,
-                cacheKey = resolved.videoId,
+                cacheKey = resolved.cacheKey,
                 title = track.title,
                 artist = track.artistName,
                 album = track.albumTitle,
@@ -626,20 +639,26 @@ class MusicPlayerController(
             return ResolvedStream(
                 videoId = null,
                 url = Uri.fromFile(File(downloadedFile)).toString(),
+                quality = AudioQuality.Automatic,
             )
         }
 
         val contentRegion = settingsProvider().contentRegion
+        val audioQuality = settingsProvider().audioQuality
         val videoId = withContext(Dispatchers.IO) {
             trackResolver.resolveVideoId(track, country = contentRegion)
         }
 
         if (videoId != null) {
-            streamUrlCache[videoId]?.let { cached ->
-                return ResolvedStream(videoId, cached)
+            val cacheKey = streamCacheKey(videoId, audioQuality)
+            streamUrlCache[cacheKey]?.let { cached ->
+                return ResolvedStream(videoId, cached, audioQuality)
             }
-            val url = withContext(Dispatchers.IO) { musicService.getStreamUrl(videoId) }
-            return url?.trim()?.takeIf { it.isNotEmpty() }?.let { ResolvedStream(videoId, it) }
+            val url = withContext(Dispatchers.IO) {
+                musicService.getStreamUrl(videoId, audioQuality)
+            }
+            return url?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { ResolvedStream(videoId, it, audioQuality) }
         }
 
         // Only a genuine direct/offline URL. The catalog mapper no longer supplies
@@ -647,10 +666,24 @@ class MusicPlayerController(
         return track.audioUrl
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
-            ?.let { ResolvedStream(videoId = null, url = it) }
+            ?.let {
+                ResolvedStream(
+                    videoId = null,
+                    url = it,
+                    quality = AudioQuality.Automatic,
+                )
+            }
     }
 
-    private data class ResolvedStream(val videoId: String?, val url: String)
+    private data class ResolvedStream(
+        val videoId: String?,
+        val url: String,
+        val quality: AudioQuality,
+    ) {
+        /** Media3’s byte cache must distinguish streams selected at each quality. */
+        val cacheKey: String?
+            get() = videoId?.let { "$it:${quality.key}" }
+    }
 
     private fun handlePlaybackCompleted() {
         if (released) return
@@ -695,6 +728,7 @@ class MusicPlayerController(
         playbackGeneration++
         playbackIntent = false
         currentVideoId = null
+        currentStreamQuality = null
         audioPlayer.stop()
         _queue.value = emptyList()
         currentTrackIndex = 0
@@ -736,13 +770,17 @@ class MusicPlayerController(
     private fun isCurrent(generation: Long): Boolean =
         !released && generation == playbackGeneration
 
-    private fun cacheStreamUrl(videoId: String, url: String) {
-        streamUrlCache.remove(videoId)
-        streamUrlCache[videoId] = url
+    private fun cacheStreamUrl(videoId: String, url: String, quality: AudioQuality) {
+        val key = streamCacheKey(videoId, quality)
+        streamUrlCache.remove(key)
+        streamUrlCache[key] = url
         while (streamUrlCache.size > MAX_CACHED_STREAMS) {
             streamUrlCache.remove(streamUrlCache.keys.first())
         }
     }
+
+    private fun streamCacheKey(videoId: String, quality: AudioQuality): String =
+        "$videoId:${quality.key}"
 
     private companion object {
         const val TAG = "SpotKofiPlayer"

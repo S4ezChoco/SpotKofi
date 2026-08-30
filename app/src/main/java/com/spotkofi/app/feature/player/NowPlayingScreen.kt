@@ -73,6 +73,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -536,12 +537,15 @@ private fun HeroArtwork(
             .pointerInput(Unit) {
                 var horizontal = 0f
                 var vertical = 0f
+                val velocityTracker = VelocityTracker()
                 detectDragGestures(
                     onDragStart = {
                         horizontal = 0f
                         vertical = 0f
+                        velocityTracker.resetTracking()
                     },
                     onDrag = { change, amount ->
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
                         change.consume()
                         horizontal += amount.x
                         vertical += amount.y
@@ -553,10 +557,14 @@ private fun HeroArtwork(
                         ) {
                             onSwipeHorizontal(horizontal)
                         } else {
-                            onDragStopped(0f)
+                            onDragStopped(-velocityTracker.calculateVelocity().y)
                         }
+                        velocityTracker.resetTracking()
                     },
-                    onDragCancel = onDragCancelled,
+                    onDragCancel = {
+                        velocityTracker.resetTracking()
+                        onDragCancelled()
+                    },
                 )
             },
     ) {

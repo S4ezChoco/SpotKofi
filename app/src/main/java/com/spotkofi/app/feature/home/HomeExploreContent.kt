@@ -107,7 +107,7 @@ fun HomeExploreSections(
 
     if (state.trendingPlaylists.isNotEmpty()) {
         HomeCollectionShelf(
-            title = "Trending community playlists",
+            title = "Trending playlists",
             items = state.trendingPlaylists,
             layout = layout,
             onCollectionClick = onCollectionClick,

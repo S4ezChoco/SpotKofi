@@ -1,5 +1,6 @@
 package com.spotkofi.app.data.service
 
+import com.spotkofi.app.data.local.AudioQuality
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
 import com.spotkofi.app.data.model.MediaCollection
@@ -213,11 +214,14 @@ class SimpleYouTubeMusicService : MusicService {
         }
     }
     
-    override suspend fun getStreamUrl(trackId: String): String? = withContext(Dispatchers.IO) {
+    override suspend fun getStreamUrl(
+        trackId: String,
+        quality: AudioQuality,
+    ): String? = withContext(Dispatchers.IO) {
         // trackId is already the selected YouTube video ID. Re-searching it can
         // select another video and was one of the reasons playback fell back to
         // the unrelated 30-second iTunes preview.
-        val extractedUrl = streamExtractor.getAudioUrl(trackId)
+        val extractedUrl = streamExtractor.getAudioUrl(trackId, quality)
         if (!extractedUrl.isNullOrBlank()) {
             Log.d(TAG, "Resolved full-length YouTube audio for $trackId")
             return@withContext extractedUrl
@@ -225,7 +229,7 @@ class SimpleYouTubeMusicService : MusicService {
 
         // Keep the internal player client as a secondary resolver, but never let
         // the controller silently replace a failed YouTube stream with a preview.
-        youtubeClient.getStreamUrl(trackId).also { url ->
+        youtubeClient.getStreamUrl(trackId, quality).also { url ->
             if (url.isNullOrBlank()) {
                 Log.w(TAG, "No YouTube audio stream resolved for $trackId")
             }

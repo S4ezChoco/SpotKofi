@@ -141,10 +141,18 @@ data class Shelf(
     val items: List<MediaCollection>,
 )
 
-/** A coloured tile in the Search browse grid. */
+/** A tile in the Search browse grid. */
 data class BrowseCategory(
     val id: String,
     val name: String,
+    /** Supporting copy shown on the tile when the provider supplies it. */
+    val subtitle: String? = null,
+    /** Remote image used behind the tile; null keeps the deterministic fallback. */
+    val artworkUrl: String? = null,
+    /** Explicit search target, rather than silently turning the display label into a query. */
+    val targetQuery: String? = null,
+    /** Opaque provider target reserved for categories that open a browse page. */
+    val browseParams: String? = null,
 )
 
 /**

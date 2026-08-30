@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Explicit
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.OpenInFull
@@ -69,6 +70,7 @@ import com.spotkofi.app.R
 import com.spotkofi.app.core.AppConstants
 import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.data.model.ChartRegion
+import com.spotkofi.app.data.local.AudioQuality
 import com.spotkofi.app.data.local.LyricsProvider
 import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
@@ -111,6 +113,7 @@ fun SettingsScreen(
 
     var showRegionPicker by remember { mutableStateOf(false) }
     var showLyricsProviderPicker by remember { mutableStateOf(false) }
+    var showAudioQualityPicker by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<ConfirmAction?>(null) }
 
     // Cache size is read on demand rather than observed: the value only moves while
@@ -193,6 +196,14 @@ fun SettingsScreen(
                     subtitle = "Expand the full player when you start a song",
                     checked = settings.openPlayerOnPlay,
                     onCheckedChange = container.settingsStore::setOpenPlayerOnPlay,
+                )
+                RowDivider()
+                ActionRow(
+                    icon = Icons.Filled.HighQuality,
+                    title = "Audio quality",
+                    subtitle = settings.audioQuality.description,
+                    trailingText = settings.audioQuality.displayName,
+                    onClick = { showAudioQualityPicker = true },
                 )
             }
 
@@ -363,6 +374,17 @@ fun SettingsScreen(
                 showLyricsProviderPicker = false
             },
             onDismiss = { showLyricsProviderPicker = false },
+        )
+    }
+
+    if (showAudioQualityPicker) {
+        AudioQualityDialog(
+            selectedQuality = settings.audioQuality,
+            onSelect = { quality ->
+                container.settingsStore.setAudioQuality(quality)
+                showAudioQualityPicker = false
+            },
+            onDismiss = { showAudioQualityPicker = false },
         )
     }
 
@@ -606,6 +628,57 @@ private fun InfoRow(
             RowText(title, subtitle, enabled = true)
         }
     }
+}
+
+@Composable
+private fun AudioQualityDialog(
+    selectedQuality: AudioQuality,
+    onSelect: (AudioQuality) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.highlight,
+        titleContentColor = colors.textPrimary,
+        title = { Text("Audio quality") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(dimens.spaceXxs)) {
+                AudioQuality.entries.forEach { quality ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(SpotKofiTheme.shapes.chip)
+                            .clickableScale(pressedScale = 0.98f) { onSelect(quality) }
+                            .padding(horizontal = dimens.spaceSm, vertical = dimens.spaceXs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = quality == selectedQuality, onClick = null)
+                        Spacer(Modifier.width(dimens.spaceSm))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = quality.displayName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = colors.textPrimary,
+                            )
+                            Text(
+                                text = quality.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textSecondary,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = colors.accent)
+            }
+        },
+    )
 }
 
 // ------------------------------------------------------------ lyrics picker

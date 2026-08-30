@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Text
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +57,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.spotkofi.app.core.AppContainer
+import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.feature.browse.ExploreScreen
 import com.spotkofi.app.feature.browse.MoodCategoryScreen
@@ -68,6 +71,7 @@ import com.spotkofi.app.feature.settings.SettingsScreen
 import com.spotkofi.app.ui.components.CreatePlaylistDialog
 import com.spotkofi.app.ui.components.MiniPlayer
 import com.spotkofi.app.ui.components.SpotKofiDrawer
+import com.spotkofi.app.ui.components.SpotKofiLaunchOverlay
 import com.spotkofi.app.ui.components.rememberSpotKofiDrawerState
 import com.spotkofi.app.ui.navigation.CollectionRoute
 import com.spotkofi.app.ui.navigation.ExploreRoute
@@ -83,13 +87,19 @@ import com.spotkofi.app.ui.navigation.SpotKofiBottomBar
 import com.spotkofi.app.ui.navigation.TopLevelDestination
 import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /** How far the tab behind the player is blurred when the player is fully open. */
 private val MaxBackdropBlur = 20.dp
 
-/** Fraction of the screen the player must be dragged down before release dismisses it. */
-private const val MINIMIZE_FRACTION = 0.82f
+/** Fraction of the screen a roughly half-height slow drag must cover before dismissing the player. */
+private const val MINIMIZE_FRACTION = 0.48f
+
+/** Downward release speed that dismisses the player before it reaches the distance threshold. */
+private const val MINIMIZE_FLING_VELOCITY_PX_PER_SEC = 1_400f
 
 /**
  * Root of the composable tree: provides the dependency container and theme, owns
@@ -120,10 +130,20 @@ fun SpotKofiApp(
             val navController = rememberNavController()
             val drawerState = rememberSpotKofiDrawerState()
 
-            val playbackState by container.playerController.state.collectAsStateWithLifecycle()
+            val playbackStateFlow = container.playerController.state
+            val playbackHasTrack by remember(playbackStateFlow) {
+                playbackStateFlow.map { it.hasTrack }.distinctUntilChanged()
+            }.collectAsStateWithLifecycle(initialValue = false)
+            val playbackTrackId by remember(playbackStateFlow) {
+                playbackStateFlow.map { it.track?.id }.distinctUntilChanged()
+            }.collectAsStateWithLifecycle(initialValue = null)
+            val playbackRequestId by remember(playbackStateFlow) {
+                playbackStateFlow.map { it.playRequestId }.distinctUntilChanged()
+            }.collectAsStateWithLifecycle(initialValue = 0L)
             val settings by container.settingsStore.settings.collectAsStateWithLifecycle()
 
             var showPlaylistDialog by remember { mutableStateOf(false) }
+            var showLaunchOverlay by remember { mutableStateOf(true) }
 
             // ---------------- Player position: one value, one owner ----------------
             // 0 = fully open, 1 = fully off the bottom. This single number drives the
@@ -145,6 +165,16 @@ fun SpotKofiApp(
             // is off-screen. Changes rarely, so reading it in composition is cheap.
             var playerMounted by remember { mutableStateOf(false) }
 
+            var miniPlayerDismissed by remember { mutableStateOf(false) }
+
+            // Track identity and explicit play requests are narrow flows, so root
+            // navigation does not recompose for the player's 100ms progress ticks.
+            LaunchedEffect(playbackTrackId, playbackRequestId, playbackHasTrack) {
+                if (playbackHasTrack) {
+                    miniPlayerDismissed = false
+                }
+            }
+
             val scope = rememberCoroutineScope()
             val settleJob = remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
@@ -165,6 +195,9 @@ fun SpotKofiApp(
             }
 
             fun openPlayer() {
+                // Opening the full player makes the collapsed dock available again
+                // when the user collapses it.
+                miniPlayerDismissed = false
                 // Mount at the dismissed position, then animate into place. The
                 // previous implementation assigned 0f immediately, which made a
                 // tap or upward mini-player swipe feel like a hard teleport.
@@ -183,9 +216,9 @@ fun SpotKofiApp(
             //
             // Opening at all is a preference: with it off, tapping a song starts the
             // audio and leaves the user on the list they were browsing.
-            LaunchedEffect(playbackState.playRequestId) {
+            LaunchedEffect(playbackRequestId) {
                 if (!settings.openPlayerOnPlay) return@LaunchedEffect
-                if (playbackState.playRequestId > 0L && playbackState.hasTrack) openPlayer()
+                if (playbackRequestId > 0L && playbackHasTrack) openPlayer()
             }
 
             val backStackEntry by navController.currentBackStackEntryAsState()
@@ -227,11 +260,16 @@ fun SpotKofiApp(
             val statusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
             val barBlock = dimens.floatingBarHeight
-            val miniBlock = if (playbackState.hasTrack) {
+            val targetMiniBlock = if (playbackHasTrack && !miniPlayerDismissed) {
                 dimens.miniPlayerHeight + dimens.spaceMd
             } else {
                 0.dp
             }
+            val miniBlock by animateDpAsState(
+                targetValue = targetMiniBlock,
+                animationSpec = Motion.smooth(),
+                label = "miniPlayerContentPadding",
+            )
 
             val screenPadding = PaddingValues(
                 top = statusInset,
@@ -245,7 +283,8 @@ fun SpotKofiApp(
 
             BackHandler(enabled = playerMounted) { settlePlayer(open = false) }
 
-            SpotKofiDrawer(
+            Box(modifier = modifier.fillMaxSize()) {
+                SpotKofiDrawer(
                 state = drawerState,
                 gesturesEnabled = !playerMounted && !isSettings,
                 drawerContent = {
@@ -262,7 +301,7 @@ fun SpotKofiApp(
                 },
             ) {
                 Box(
-                    modifier = modifier
+                    modifier = Modifier
                         .fillMaxSize()
                         .background(SpotKofiTheme.colors.base),
                 ) {
@@ -435,37 +474,23 @@ fun SpotKofiApp(
                             }
                         }
 
-                        // ---- Mini player: above content, below the Create scrim ----
-                        AnimatedVisibility(
-                            visible = !isSettings,
-                            enter = slideInVertically(Motion.player()) { it } +
-                                fadeIn(Motion.fast()),
-                            exit = slideOutVertically(Motion.player()) { it } +
-                                fadeOut(Motion.fast()),
+                        MiniPlayerHost(
+                            stateFlow = playbackStateFlow,
+                            visible = !isSettings && playbackHasTrack && !miniPlayerDismissed,
+                            barBlock = barBlock,
                             modifier = Modifier.align(Alignment.BottomCenter),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .navigationBarsPadding()
-                                    .padding(bottom = barBlock),
-                            ) {
-                                // Renders nothing until a track is loaded.
-                                MiniPlayer(
-                                    state = playbackState,
-                                    onClick = ::openPlayer,
-                                    onTogglePlayPause = container.playerController::togglePlayPause,
-                                    onToggleSaved = container.playerController::toggleSaved,
-                                    onNext = container.playerController::next,
-                                    onPrevious = container.playerController::previous,
-                                    onDismiss = {
-                                        if (settings.stopOnPlayerDismiss) {
-                                            container.playerController.stop()
-                                        }
-                                    },
-                                )
-                            }
-                        }
-
+                            onClick = ::openPlayer,
+                            onTogglePlayPause = container.playerController::togglePlayPause,
+                            onToggleSaved = container.playerController::toggleSaved,
+                            onNext = container.playerController::next,
+                            onPrevious = container.playerController::previous,
+                            onDismiss = {
+                                miniPlayerDismissed = true
+                                if (settings.stopOnPlayerDismiss) {
+                                    container.playerController.stop()
+                                }
+                            },
+                        )
                         CreatePlaylistDialog(
                             visible = showPlaylistDialog,
                             onDismiss = { showPlaylistDialog = false },
@@ -519,9 +544,11 @@ fun SpotKofiApp(
                     // translation, which is exactly how the two got out of step
                     // before. Mount/unmount is a plain boolean and all motion comes
                     // from the one position value.
-                    // Keep Now Playing composed while a track exists so the
-                    // external-link handoff state survives collapsing to the mini-player.
-                    if (playerMounted || playbackState.hasTrack) {
+                    // The full player is mounted only while it is visible or settling.
+                    // Once collapsed, the mini-player owns progress rendering; keeping
+                    // this hidden subtree alive would recompose its scrubber, lyrics,
+                    // and transport on every playback tick for no visible benefit.
+                    if (playerMounted) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -558,10 +585,18 @@ fun SpotKofiApp(
                                             .coerceIn(0f, 1f)
                                 },
                                 onDragStopped = { velocity ->
-                                    // A partial downward gesture is reversible. Only a
-                                    // near-complete drag dismisses the full player;
-                                    // playback remains in the mini player.
-                                    val dismiss = playerPos.floatValue >= MINIMIZE_FRACTION
+                                    // A slow partial gesture is reversible until it
+                                    // reaches the half-height distance threshold. A
+                                    // decisive downward fling may dismiss sooner, while
+                                    // a decisive upward release always returns home.
+                                    val downwardFling =
+                                        velocity >= MINIMIZE_FLING_VELOCITY_PX_PER_SEC
+                                    val upwardFling =
+                                        velocity <= -MINIMIZE_FLING_VELOCITY_PX_PER_SEC
+                                    val dismiss = !upwardFling && (
+                                        playerPos.floatValue >= MINIMIZE_FRACTION ||
+                                            downwardFling
+                                        )
                                     settlePlayer(open = !dismiss, velocityPxPerSec = velocity)
                                 },
                                 onDragCancelled = {
@@ -573,7 +608,66 @@ fun SpotKofiApp(
                             )
                         }
                     }
+
+                    if (showLaunchOverlay) {
+                        SpotKofiLaunchOverlay(
+                            onFinished = { showLaunchOverlay = false },
+                        )
+                    }
                 }
+            }
+        }
+    }
+}
+}
+
+@Composable
+private fun MiniPlayerHost(
+    stateFlow: StateFlow<PlaybackState>,
+    visible: Boolean,
+    barBlock: Dp,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onToggleSaved: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val liveState by stateFlow.collectAsStateWithLifecycle()
+    var lastTrackState by remember { mutableStateOf<PlaybackState?>(null) }
+
+    // Progress updates stay inside this small subtree. The app root only observes
+    // track identity and play requests, which prevents navigation and backdrop
+    // composition from running ten times per second.
+    LaunchedEffect(Unit) {
+        stateFlow.collect { state ->
+            if (state.hasTrack) lastTrackState = state
+        }
+    }
+
+    val renderedState = if (liveState.hasTrack) liveState else lastTrackState
+    if (renderedState != null) {
+        AnimatedVisibility(
+            visible = visible,
+            enter = slideInVertically(Motion.player()) { it } + fadeIn(Motion.fast()),
+            exit = slideOutVertically(Motion.player()) { it } + fadeOut(Motion.fast()),
+            modifier = modifier,
+        ) {
+            Box(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = barBlock),
+            ) {
+                MiniPlayer(
+                    state = renderedState,
+                    onClick = onClick,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onToggleSaved = onToggleSaved,
+                    onNext = onNext,
+                    onPrevious = onPrevious,
+                    onDismiss = onDismiss,
+                )
             }
         }
     }

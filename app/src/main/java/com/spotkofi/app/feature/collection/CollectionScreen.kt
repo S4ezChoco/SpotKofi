@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.Icon
@@ -55,7 +54,6 @@ import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
 import com.spotkofi.app.data.model.MediaCollection
-import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Playlist
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
@@ -71,6 +69,8 @@ import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 @Composable
 fun CollectionScreen(
@@ -88,7 +88,12 @@ fun CollectionScreen(
         )
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val playingTrackId by remember(container.playerController.state) {
+        container.playerController.state.map { it.track?.id }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
+    val isPlaying by remember(container.playerController.state) {
+        container.playerController.state.map { it.isPlaying }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
     val savedTracks by container.localStore.savedTracks.collectAsStateWithLifecycle()
     val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
     val savedCollections by container.localStore.savedCollections.collectAsStateWithLifecycle()
@@ -113,13 +118,11 @@ fun CollectionScreen(
         CollectionContent(
             state = state,
             downloads = downloadsByTrack,
-            playback = playback,
+            playingTrackId = playingTrackId,
+            isPlaying = isPlaying,
             onBack = onBack,
             onPlayAll = viewModel::onPlayAll,
-            onShuffle = {
-                container.playerController.toggleShuffle()
-                viewModel.onPlayAll()
-            },
+            onShuffle = viewModel::onShuffle,
             onTrackClick = viewModel::onTrackClick,
             onTrackMore = { selectedTrack = it },
             isCollectionSaved = state.collection?.let { collection ->
@@ -170,7 +173,8 @@ fun CollectionScreen(
 private fun CollectionContent(
     state: CollectionViewModel.UiState,
     downloads: Map<String, DownloadItem>,
-    playback: PlaybackState,
+    playingTrackId: String?,
+    isPlaying: Boolean,
     onBack: () -> Unit,
     onPlayAll: () -> Unit,
     onShuffle: () -> Unit = {},
@@ -277,11 +281,19 @@ private fun CollectionContent(
 
                     Spacer(Modifier.height(dimens.spaceMd))
 
-                    OwnerRow(
-                        collection = collection,
-                        isSaved = isCollectionSaved,
-                        onToggleSave = onToggleCollectionSave,
-                    )
+                    val owner = collection.ownerName()
+                    if (owner != null) {
+                        OwnerRow(
+                            owner = owner,
+                            isSaved = isCollectionSaved,
+                            onToggleSave = onToggleCollectionSave,
+                        )
+                    } else {
+                        SaveOnlyRow(
+                            isSaved = isCollectionSaved,
+                            onToggleSave = onToggleCollectionSave,
+                        )
+                    }
 
                     Spacer(Modifier.height(dimens.spaceSm))
 
@@ -289,15 +301,17 @@ private fun CollectionContent(
 
                     CollectionDescription(collection = collection)
 
-                    Spacer(Modifier.height(dimens.spaceMd))
+                    if (state.tracks.isNotEmpty()) {
+                        Spacer(Modifier.height(dimens.spaceMd))
 
-                    ActionRow(
-                        isPlaying = playback.isPlaying &&
-                            playback.track?.id in state.tracks.map { it.id },
-                        onPlayAll = onPlayAll,
-                        onShuffle = onShuffle,
-                        onDownloadAll = onDownloadAll,
-                    )
+                        ActionRow(
+                            isPlaying = isPlaying &&
+                                playingTrackId in state.tracks.map { it.id },
+                            onPlayAll = onPlayAll,
+                            onShuffle = onShuffle,
+                            onDownloadAll = onDownloadAll,
+                        )
+                    }
 
                     Spacer(Modifier.height(dimens.spaceLg))
                 }
@@ -308,7 +322,7 @@ private fun CollectionContent(
                 TrackRow(
                     track = track,
                     onClick = { onTrackClick(track) },
-                    isPlaying = playback.track?.id == track.id,
+                    isPlaying = playingTrackId == track.id,
                     downloadStatus = download?.status,
                     downloadProgress = download?.progress ?: 0,
                     onMoreClick = { onTrackMore(track) },
@@ -350,28 +364,23 @@ private fun CollectionContent(
     }
 }
 
-/** Add-circle, owner avatar and owner name. */
+/** Save control plus a provider-backed owner. Albums do not use their artist as an owner. */
 @Composable
 private fun OwnerRow(
-    collection: MediaCollection,
+    owner: String,
     isSaved: Boolean,
     onToggleSave: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
-    val owner = collection.ownerName()
 
     Row(
         modifier = Modifier.padding(horizontal = dimens.screenGutter),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = if (isSaved) Icons.Filled.Check else Icons.Filled.AddCircleOutline,
-            contentDescription = stringResource(R.string.cd_add_to_library),
-            tint = if (isSaved) colors.accent else colors.textSecondary,
-            modifier = Modifier
-                .size(24.dp)
-                .clickable(onClick = onToggleSave),
+        SaveIcon(
+            isSaved = isSaved,
+            onClick = onToggleSave,
         )
         Spacer(Modifier.width(dimens.spaceSm))
         Artwork(id = owner, size = 22.dp, shape = CircleShape)
@@ -386,29 +395,56 @@ private fun OwnerRow(
     }
 }
 
-/** Globe plus "N saves - total duration". */
+@Composable
+private fun SaveOnlyRow(
+    isSaved: Boolean,
+    onToggleSave: () -> Unit,
+) {
+    val dimens = SpotKofiTheme.dimens
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = dimens.screenGutter),
+    ) {
+        SaveIcon(isSaved = isSaved, onClick = onToggleSave)
+    }
+}
+
+@Composable
+private fun SaveIcon(
+    isSaved: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = SpotKofiTheme.colors
+    Icon(
+        imageVector = if (isSaved) Icons.Filled.Check else Icons.Filled.AddCircleOutline,
+        contentDescription = if (isSaved) "Remove from library" else "Add to library",
+        tint = if (isSaved) colors.accent else colors.textSecondary,
+        modifier = Modifier
+            .size(24.dp)
+            .clickable(onClick = onClick),
+    )
+}
+
+/** Only provider-backed playlist owners are shown; an album artist is metadata, not an owner. */
+private fun MediaCollection.ownerName(): String? = when (this) {
+    is Playlist -> ownerName.trim().takeIf { it.isNotEmpty() }
+    is Album, is Artist -> null
+}
+
+/** Metadata that the provider actually returned. No public/globe state is invented here. */
 @Composable
 private fun MetaRow(collection: MediaCollection, tracks: List<Track>) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
+    val line = collection.metaLine(tracks).takeIf { it.isNotBlank() } ?: return
 
-    Row(
+    Text(
+        text = line,
+        style = MaterialTheme.typography.bodyMedium,
+        color = colors.textSecondary,
         modifier = Modifier.padding(horizontal = dimens.screenGutter),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Public,
-            contentDescription = null,
-            tint = colors.textSecondary,
-            modifier = Modifier.size(15.dp),
-        )
-        Spacer(Modifier.width(dimens.spaceXs))
-        Text(
-            text = collection.metaLine(tracks),
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary,
-        )
-    }
+    )
 }
 
 @Composable
@@ -471,13 +507,7 @@ private fun ActionRow(
     }
 }
 
-private fun MediaCollection.ownerName(): String = when (this) {
-    is Playlist -> ownerName
-    is Album -> artistName
-    is Artist -> name
-}
-
-/** The line under the owner row. */
+/** The line under the owner row, composed only from real collection fields. */
 private fun MediaCollection.metaLine(tracks: List<Track>): String {
     val totalMs = tracks.sumOf { it.durationMs }
     val minutes = totalMs / 60_000
@@ -487,23 +517,25 @@ private fun MediaCollection.metaLine(tracks: List<Track>): String {
         "${minutes}min"
     }
 
-    // Every part is omitted when the catalog does not report it, rather than
-    // printing a zero or an invented figure.
     return when (this) {
-        is Playlist -> listOf("${tracks.size} songs", duration).joinToString(" \u2022 ")
-
-        is Album -> listOfNotNull(
-            year?.toString(),
-            genre,
-            "${tracks.size} songs".takeIf { tracks.isNotEmpty() },
-            duration.takeIf { tracks.isNotEmpty() },
+        is Playlist -> listOfNotNull(
+            "Playlist".takeIf { title.isNotBlank() },
+            "${tracks.size} tracks".takeIf { tracks.isNotEmpty() },
+            duration.takeIf { tracks.isNotEmpty() && totalMs > 0L },
         ).joinToString(" \u2022 ")
 
-        // The catalog exposes no listener counts, so the genre is all there is.
+        is Album -> listOfNotNull(
+            artistName.trim().takeIf { it.isNotEmpty() },
+            year?.toString(),
+            "${tracks.size} tracks".takeIf { tracks.isNotEmpty() },
+            "${trackCount} tracks".takeIf { tracks.isEmpty() && trackCount > 0 },
+            duration.takeIf { tracks.isNotEmpty() && totalMs > 0L },
+        ).distinct().joinToString(" \u2022 ")
+
         is Artist -> listOfNotNull(
-            genre,
-            "${tracks.size} songs".takeIf { tracks.isNotEmpty() },
-        ).joinToString(" \u2022 ").ifBlank { "Artist" }
+            genre?.trim()?.takeIf { it.isNotEmpty() },
+            "${tracks.size} tracks".takeIf { tracks.isNotEmpty() },
+        ).joinToString(" \u2022 ")
     }
 }
 
@@ -518,7 +550,8 @@ private fun CollectionPreview() {
                 isLoading = false,
             ),
             downloads = emptyMap(),
-            playback = PlaybackState(),
+            playingTrackId = null,
+            isPlaying = false,
             onBack = {},
             onPlayAll = {},
             onTrackClick = {},

@@ -639,14 +639,62 @@ class ItunesMusicRepository internal constructor(
         const val SONG_SHELF_LIMIT = 6
 
         val BrowseGenres = listOf(
-            BrowseCategory("tc_music", "Music"),
-            BrowseCategory("tc_podcasts", "Podcasts"),
-            BrowseCategory("tc_opm", "OPM"),
-            BrowseCategory("tc_kpop", "K-Pop"),
-            BrowseCategory("tc_pop", "Pop"),
-            BrowseCategory("tc_rock", "Rock"),
-            BrowseCategory("tc_hiphop", "Hip-Hop"),
-            BrowseCategory("tc_jazz", "Jazz"),
+            BrowseCategory(
+                id = "tc_music",
+                name = "Music",
+                subtitle = "Songs, albums and artists",
+                artworkUrl = "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=900&q=85",
+                targetQuery = "music",
+            ),
+            BrowseCategory(
+                id = "tc_podcasts",
+                name = "Podcasts",
+                subtitle = "Shows and episodes",
+                artworkUrl = "https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=900&q=85",
+                targetQuery = "podcasts",
+            ),
+            BrowseCategory(
+                id = "tc_opm",
+                name = "OPM",
+                subtitle = "Filipino music",
+                artworkUrl = "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=900&q=85",
+                targetQuery = "OPM",
+            ),
+            BrowseCategory(
+                id = "tc_kpop",
+                name = "K-Pop",
+                subtitle = "K-Pop ON!",
+                artworkUrl = "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?w=900&q=85",
+                targetQuery = "K-Pop",
+            ),
+            BrowseCategory(
+                id = "tc_pop",
+                name = "Pop",
+                subtitle = "Popular right now",
+                artworkUrl = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=900&q=85",
+                targetQuery = "pop music",
+            ),
+            BrowseCategory(
+                id = "tc_rock",
+                name = "Rock",
+                subtitle = "Guitars and anthems",
+                artworkUrl = "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=900&q=85",
+                targetQuery = "rock music",
+            ),
+            BrowseCategory(
+                id = "tc_hiphop",
+                name = "Hip-Hop",
+                subtitle = "Rap and hip-hop",
+                artworkUrl = "https://images.unsplash.com/photo-1529502669403-9f7cb79a2ca5?w=900&q=85",
+                targetQuery = "hip hop",
+            ),
+            BrowseCategory(
+                id = "tc_jazz",
+                name = "Jazz",
+                subtitle = "Smooth and classic",
+                artworkUrl = "https://images.unsplash.com/photo-1511192336575-5b1d4b8a0f3a?w=900&q=85",
+                targetQuery = "jazz music",
+            ),
         )
     }
 }

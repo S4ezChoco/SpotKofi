@@ -1,5 +1,6 @@
 package com.spotkofi.app.data.service
 
+import com.spotkofi.app.data.local.AudioQuality
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
 import com.spotkofi.app.data.model.MediaCollection
@@ -43,7 +44,7 @@ interface MusicService {
     suspend fun getRelatedArtists(artistId: String): List<Artist>
     
     // Audio streaming
-    suspend fun getStreamUrl(trackId: String): String?
+    suspend fun getStreamUrl(trackId: String, quality: AudioQuality = AudioQuality.Automatic): String?
     
     // Playlist management
     suspend fun getUserPlaylists(): List<MediaCollection>
@@ -290,7 +291,10 @@ class InMemoryMusicService : MusicService {
         }
     }
     
-    override suspend fun getStreamUrl(trackId: String): String? {
+    override suspend fun getStreamUrl(
+        trackId: String,
+        quality: AudioQuality,
+    ): String? {
         // No real audio URL is available from this in-memory service.
         return null
     }

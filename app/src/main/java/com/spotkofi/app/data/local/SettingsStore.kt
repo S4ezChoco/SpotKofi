@@ -6,6 +6,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/** Audio format preference used by the YouTube extractor and downloads. */
+enum class AudioQuality(
+    val key: String,
+    val displayName: String,
+    val description: String,
+) {
+    Automatic("automatic", "Automatic", "Lets the provider choose the best available format"),
+    High("high", "High", "Prefers the highest available audio bitrate"),
+    Low("low", "Low", "Prefers a smaller stream for slower connections"),
+    ;
+
+    companion object {
+        fun fromKey(value: String?): AudioQuality =
+            entries.firstOrNull { it.key == value } ?: Automatic
+    }
+}
+
 /** Lyrics sources that can be selected without requiring a provider token. */
 enum class LyricsProvider(
     val key: String,
@@ -65,6 +82,8 @@ data class AppSettings(
     val openPlayerOnPlay: Boolean = true,
     /** Swiping the player away also stops the audio. */
     val stopOnPlayerDismiss: Boolean = true,
+    /** Preferred stream quality; read by playback and downloads. */
+    val audioQuality: AudioQuality = AudioQuality.Automatic,
 
     // ---- Content ----
     /**
@@ -113,6 +132,8 @@ class SettingsStore(context: Context) {
 
     fun setStopOnPlayerDismiss(value: Boolean) = update { it.copy(stopOnPlayerDismiss = value) }
 
+    fun setAudioQuality(value: AudioQuality) = update { it.copy(audioQuality = value) }
+
     fun setContentRegion(code: String) = update {
         it.copy(contentRegion = code.trim().uppercase().take(2).ifBlank { "PH" })
     }
@@ -146,6 +167,9 @@ class SettingsStore(context: Context) {
             restoreQueueOnStart = prefs.getBoolean(KEY_RESTORE_QUEUE, defaults.restoreQueueOnStart),
             openPlayerOnPlay = prefs.getBoolean(KEY_OPEN_PLAYER, defaults.openPlayerOnPlay),
             stopOnPlayerDismiss = prefs.getBoolean(KEY_STOP_ON_DISMISS, defaults.stopOnPlayerDismiss),
+            audioQuality = AudioQuality.fromKey(
+                prefs.getString(KEY_AUDIO_QUALITY, defaults.audioQuality.key),
+            ),
             contentRegion = prefs.getString(KEY_REGION, defaults.contentRegion)
                 ?.takeIf { it.isNotBlank() }
                 ?.uppercase()
@@ -168,6 +192,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_RESTORE_QUEUE, value.restoreQueueOnStart)
             .putBoolean(KEY_OPEN_PLAYER, value.openPlayerOnPlay)
             .putBoolean(KEY_STOP_ON_DISMISS, value.stopOnPlayerDismiss)
+            .putString(KEY_AUDIO_QUALITY, value.audioQuality.key)
             .putString(KEY_REGION, value.contentRegion)
             .putBoolean(KEY_HIDE_EXPLICIT, value.hideExplicitContent)
             .putBoolean(KEY_LYRICS, value.lyricsEnabled)
@@ -181,6 +206,7 @@ class SettingsStore(context: Context) {
         const val KEY_RESTORE_QUEUE = "restore_queue_on_start"
         const val KEY_OPEN_PLAYER = "open_player_on_play"
         const val KEY_STOP_ON_DISMISS = "stop_on_player_dismiss"
+        const val KEY_AUDIO_QUALITY = "audio_quality"
         const val KEY_REGION = "content_region"
         const val KEY_HIDE_EXPLICIT = "hide_explicit_content"
         const val KEY_LYRICS = "lyrics_enabled"

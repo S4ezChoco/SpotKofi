@@ -93,7 +93,7 @@ fun ExploreScreen(
         )
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val playingTrackId by viewModel.playingTrackId.collectAsStateWithLifecycle(initialValue = null)
 
     var showRegionPicker by remember { mutableStateOf(false) }
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
@@ -160,7 +160,7 @@ fun ExploreScreen(
                 else -> ExploreContent(
                     state = state,
                     listState = listState,
-                    playingTrackId = playback.track?.id,
+                    playingTrackId = playingTrackId,
                     onRegionClick = { showRegionPicker = true },
                     onCollectionClick = onCollectionClick,
                     onCategoryClick = onCategoryClick,
@@ -282,7 +282,7 @@ private fun ExploreContent(
         if (state.trendingPlaylists.isNotEmpty()) {
             item(key = "trending") {
                 Column {
-                    SectionHeader(title = "Trending community playlists")
+                    SectionHeader(title = "Trending playlists")
                     CollectionShelf(
                         items = state.trendingPlaylists,
                         onClick = onCollectionClick,

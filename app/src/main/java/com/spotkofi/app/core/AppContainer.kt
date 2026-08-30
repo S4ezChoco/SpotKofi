@@ -44,7 +44,12 @@ class AppContainer(
         settingsProvider = { settingsStore.current },
     )
     val musicService: MusicService = SimpleYouTubeMusicService()
-    val downloadManager = DownloadManager(context, musicService, localStore)
+    val downloadManager = DownloadManager(
+        context = context,
+        musicService = musicService,
+        localStore = localStore,
+        settingsProvider = { settingsStore.current },
+    )
     val playbackCache = PlaybackCache(context)
 
     private val musicPlayerController = MusicPlayerController(

@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
@@ -102,13 +103,39 @@ private data class SearchCategory(
     val title: String,
     val subtitle: String,
     val color: Color,
+    val artworkUrl: String? = null,
+    val targetQuery: String? = null,
 )
 
 private val searchCategories = listOf(
-    SearchCategory("Music", "Songs, albums and artists", Color(0xFFE41483)),
-    SearchCategory("Podcasts", "Episodes and shows", Color(0xFF087A61)),
-    SearchCategory("Live Events", "Find music near you", Color(0xFF8B00E8)),
-    SearchCategory("K-Pop ON!", "Discover new releases", Color(0xFF354FC4)),
+    SearchCategory(
+        title = "Music",
+        subtitle = "Songs, albums and artists",
+        color = Color(0xFFE41483),
+        artworkUrl = "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=900&q=85",
+        targetQuery = "music",
+    ),
+    SearchCategory(
+        title = "Podcasts",
+        subtitle = "Episodes and shows",
+        color = Color(0xFF087A61),
+        artworkUrl = "https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=900&q=85",
+        targetQuery = "podcasts",
+    ),
+    SearchCategory(
+        title = "Live Events",
+        subtitle = "Find music near you",
+        color = Color(0xFF8B00E8),
+        artworkUrl = "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=900&q=85",
+        targetQuery = "live music events",
+    ),
+    SearchCategory(
+        title = "K-Pop ON!",
+        subtitle = "Discover new releases",
+        color = Color(0xFF354FC4),
+        artworkUrl = "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?w=900&q=85",
+        targetQuery = "K-Pop",
+    ),
 )
 
 /**
@@ -195,7 +222,9 @@ fun SearchScreen(
             when {
                 query.trim().length < MinQueryLength ->
                     SearchLanding(
-                        onCategoryClick = { query = it.title },
+                        onCategoryClick = { category ->
+                            query = category.targetQuery ?: category.title
+                        },
                     )
 
                 error != null -> ErrorState(
@@ -371,9 +400,9 @@ private fun ColumnScope.SearchResultsContent(
     val showAlbums = filter == SearchFilter.All || filter == SearchFilter.Albums
     val showPlaylists = filter == SearchFilter.All || filter == SearchFilter.Playlists
 
-    // In All, artists are capped so the songs the user is probably after are not
-    // pushed a full screen down.
-    val visibleArtists = if (filter == SearchFilter.All) artists.take(3) else artists
+    // Keep every provider artist in All. The filter row already lets the user
+    // narrow the list; silently dropping valid artists made the result set look broken.
+    val visibleArtists = artists
 
     Column(modifier = Modifier.weight(1f)) {
         Row(
@@ -589,13 +618,15 @@ private fun ColumnScope.SearchLanding(
     val browseTiles = browseCategories.mapIndexed { index, category ->
         SearchCategory(
             title = category.name,
-            subtitle = "Search the catalog",
+            subtitle = category.subtitle ?: "Search the catalog",
             color = listOf(
                 Color(0xFF5B35D5),
                 Color(0xFF087A61),
                 Color(0xFFE41483),
                 Color(0xFFB85B12),
             )[index % 4],
+            artworkUrl = category.artworkUrl,
+            targetQuery = category.targetQuery,
         )
     }
 
@@ -711,27 +742,49 @@ private fun SearchCategoryCard(
 
     Box(
         modifier = modifier
-            .height(92.dp)
+            .height(132.dp)
             .clip(SpotKofiTheme.shapes.card)
-            .background(category.color)
-            .clickable(onClick = onClick)
-            .padding(dimens.spaceMd),
+            .clickable(onClick = onClick),
     ) {
-        Text(
-            text = category.title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Artwork(
+            id = category.title,
+            url = category.artworkUrl,
+            modifier = Modifier.fillMaxSize(),
+            shape = SpotKofiTheme.shapes.card,
+            contentDescription = null,
         )
-        Text(
-            text = category.subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.8f),
-            modifier = Modifier.align(Alignment.BottomStart),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            category.color.copy(alpha = 0.12f),
+                            category.color.copy(alpha = 0.92f),
+                        ),
+                    ),
+                ),
         )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(dimens.spaceMd),
+        ) {
+            Text(
+                text = category.title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = category.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.84f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

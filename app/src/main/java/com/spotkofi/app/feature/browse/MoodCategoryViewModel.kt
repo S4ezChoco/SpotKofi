@@ -4,15 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.MoodCategory
-import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -37,7 +39,10 @@ class MoodCategoryViewModel(
     private val _uiState = MutableStateFlow(UiState(title = category.title))
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    val playbackState: StateFlow<PlaybackState> = player.state
+    /** Track rows only need identity; progress and buffering stay out of this page. */
+    val playingTrackId: Flow<String?> = player.state
+        .map { it.track?.id }
+        .distinctUntilChanged()
 
     private var loadJob: Job? = null
 

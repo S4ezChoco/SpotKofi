@@ -184,8 +184,9 @@ internal class YouTubeMusicSearchClient(
             Album(
                 id = YouTubeIds.album(id),
                 title = title,
-                artistName = subtitle.firstOrNull { it.toIntOrNull() == null }.orEmpty(),
+                artistName = subtitle.firstOrNull { it.isPersonOrArtistName() }.orEmpty(),
                 year = subtitle.firstNotNullOfOrNull { it.toReleaseYear() },
+                trackCount = subtitle.firstNotNullOfOrNull { it.toTrackCount() } ?: 0,
                 artworkUrl = renderer.thumbnailUrl(),
             )
         }
@@ -201,8 +202,10 @@ internal class YouTubeMusicSearchClient(
             Playlist(
                 id = YouTubeIds.playlist(id),
                 title = title,
-                description = subtitle.firstOrNull().orEmpty(),
-                ownerName = subtitle.firstOrNull().orEmpty().ifEmpty { "YouTube Music" },
+                // Search subtitles expose the owner, not a playlist description.
+                // Keeping it out of description prevents the same string appearing twice.
+                description = "",
+                ownerName = subtitle.firstOrNull { it.isPersonOrArtistName() }.orEmpty(),
                 artworkUrl = renderer.thumbnailUrl(),
             )
         }
@@ -228,6 +231,19 @@ internal class YouTubeMusicSearchClient(
 
     private fun String.toReleaseYear(): Int? =
         trim().toIntOrNull()?.takeIf { it in 1900..2100 }
+
+    private fun String.toTrackCount(): Int? {
+        val parts = trim().split(' ').filter { it.isNotBlank() }
+        val count = parts.firstOrNull()?.toIntOrNull() ?: return null
+        val label = parts.drop(1).joinToString(" ").lowercase()
+        return count.takeIf { it > 0 && (label == "song" || label == "songs" || label == "track" || label == "tracks") }
+    }
+
+    private fun String.isPersonOrArtistName(): Boolean =
+        isNotBlank() && toReleaseYear() == null && toTrackCount() == null &&
+            !contains("album", ignoreCase = true) &&
+            !contains("playlist", ignoreCase = true) &&
+            !equals("YouTube Music", ignoreCase = true)
 
     /** Kept for callers that only need to know whether the row is explicit. */
     @Suppress("unused")

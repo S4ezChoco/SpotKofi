@@ -2,6 +2,8 @@ package com.spotkofi.app.data.service
 
 import android.content.Context
 import androidx.core.content.ContextCompat
+import com.spotkofi.app.data.local.AppSettings
+import com.spotkofi.app.data.local.AudioQuality
 import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.remote.YouTubeTrackResolver
@@ -55,6 +57,7 @@ class DownloadManager(
     context: Context,
     private val musicService: MusicService,
     private val localStore: LocalMusicStore,
+    private val settingsProvider: () -> AppSettings = { AppSettings() },
 ) {
 
     private val appContext = context.applicationContext
@@ -420,13 +423,17 @@ class DownloadManager(
             if (findById(item.id)?.status != DownloadManagerStatus.QUEUED) return
 
             val generation = nextGenerationLocked(item.id)
+            // Capture quality for the entire transfer. If the setting changes while
+            // a signed URL is being fetched, this operation must not change stream
+            // identity halfway through its partial file.
+            val quality = settingsProvider().audioQuality
             if (resetPartialOnStart.remove(item.id)) {
-                temporaryFileFor(item.track).delete()
+                partialFilesFor(item.track).forEach(File::delete)
                 fileFor(item.track).delete()
             }
 
             removeItemFromAllLocked(item.id)
-            val partialBytes = temporaryFileFor(item.track).length().coerceAtLeast(0L)
+            val partialBytes = temporaryFileFor(item.track, quality).length().coerceAtLeast(0L)
             val active = item.copy(
                 status = DownloadManagerStatus.DOWNLOADING,
                 progress = progressOf(partialBytes, item.totalBytes),
@@ -440,10 +447,10 @@ class DownloadManager(
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     ensureOperationCurrent(item.id, generation)
-                    val resolved = resolveStream(item.track)
+                    val resolved = resolveStream(item.track, quality)
                         ?: throw IOException("No full-length stream was found")
                     ensureOperationCurrent(item.id, generation)
-                    val result = downloadToFile(active, resolved.url, generation)
+                    val result = downloadToFile(active, resolved.url, generation, quality)
                     ensureOperationCurrent(item.id, generation)
                     val destination = fileFor(item.track)
                     val completed = active.copy(
@@ -471,7 +478,7 @@ class DownloadManager(
                     ) {
                         return@launch
                     }
-                    val partialBytes = temporaryFileFor(item.track).length()
+                    val partialBytes = temporaryFileFor(item.track, quality).length()
                     val failed = active.copy(
                         status = DownloadManagerStatus.FAILED,
                         progress = progressOf(partialBytes, active.totalBytes),
@@ -506,10 +513,15 @@ class DownloadManager(
     }
 
     /** Resolves a fresh signed URL, with the same direct-URL fallback as playback. */
-    private suspend fun resolveStream(track: Track): ResolvedDownload? {
+    private suspend fun resolveStream(
+        track: Track,
+        quality: AudioQuality,
+    ): ResolvedDownload? {
         val videoId = withContext(Dispatchers.IO) { resolver.resolveVideoId(track) }
         if (videoId != null) {
-            val url = withContext(Dispatchers.IO) { musicService.getStreamUrl(videoId) }
+            val url = withContext(Dispatchers.IO) {
+                musicService.getStreamUrl(videoId, quality)
+            }
             url?.trim()?.takeIf { it.isNotEmpty() }?.let {
                 return ResolvedDownload(videoId, it)
             }
@@ -529,8 +541,9 @@ class DownloadManager(
         item: DownloadItem,
         url: String,
         generation: Long,
+        quality: AudioQuality,
     ): TransferResult {
-        val partial = temporaryFileFor(item.track)
+        val partial = temporaryFileFor(item.track, quality)
         val destination = fileFor(item.track)
         partial.parentFile?.mkdirs()
         destination.parentFile?.mkdirs()
@@ -825,7 +838,7 @@ class DownloadManager(
     private fun cleanupDownloadFiles(item: DownloadItem) {
         item.filePath?.let(::File)?.delete()
         fileFor(item.track).delete()
-        temporaryFileFor(item.track).delete()
+        partialFilesFor(item.track).forEach(File::delete)
     }
 
     private fun sortQueue(items: List<DownloadItem>): List<DownloadItem> = items.sortedWith(
@@ -854,7 +867,15 @@ class DownloadManager(
 
     private fun fileFor(track: Track): File = File(downloadDirectory, "${safeKey(track)}.audio")
 
-    private fun temporaryFileFor(track: Track): File = File(temporaryDirectory, "${safeKey(track)}.part")
+    private fun temporaryFileFor(track: Track, quality: AudioQuality): File = File(
+        temporaryDirectory,
+        "${safeKey(track)}.${quality.key}.part",
+    )
+
+    /** Includes the legacy unqualified path so cancellation cleans old app data too. */
+    private fun partialFilesFor(track: Track): List<File> =
+        AudioQuality.entries.map { temporaryFileFor(track, it) } +
+            File(temporaryDirectory, "${safeKey(track)}.part")
 
     private fun safeKey(track: Track): String = (track.videoId ?: track.id)
         .replace(Regex("[^A-Za-z0-9._-]"), "_")

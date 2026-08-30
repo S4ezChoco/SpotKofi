@@ -1,5 +1,6 @@
 package com.spotkofi.app.feature.library
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spotkofi.app.core.LocalAppContainer
+import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
 import com.spotkofi.app.data.model.MediaCollection
@@ -69,6 +74,7 @@ import com.spotkofi.app.ui.components.SpotKofiChip
 import com.spotkofi.app.ui.components.TrackActionsSheet
 import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
+import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlinx.coroutines.launch
 
@@ -112,14 +118,28 @@ fun LibraryScreen(
     val repository = container.musicRepository
     val store = container.localStore
     val dimens = SpotKofiTheme.dimens
+    val colors = SpotKofiTheme.colors
     val layout = rememberResponsiveLayout()
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    val headerLifted by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 4
+        }
+    }
+    val headerSurface by animateColorAsState(
+        targetValue = if (headerLifted) colors.base else colors.base.copy(alpha = 0.96f),
+        animationSpec = Motion.fast(),
+        label = "libraryStickyHeader",
+    )
 
     val userName = remember { repository.currentUserName() }
     val savedCollections by store.savedCollections.collectAsStateWithLifecycle()
     val playlists by store.playlists.collectAsStateWithLifecycle()
     val savedTracks by store.savedTracks.collectAsStateWithLifecycle()
     val history by store.history.collectAsStateWithLifecycle()
+    val historyStats by store.historyStats.collectAsStateWithLifecycle()
     val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
 
     var filter by remember { mutableStateOf(LibraryFilter.All) }
@@ -127,6 +147,7 @@ fun LibraryScreen(
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
     var showLibrarySearch by remember { mutableStateOf(false) }
     var libraryQuery by remember { mutableStateOf("") }
+    var showAnalytics by remember { mutableStateOf(false) }
 
     val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
 
@@ -166,7 +187,10 @@ fun LibraryScreen(
     val tracks = when (filter) {
         LibraryFilter.Downloaded -> downloadedTracks
         LibraryFilter.All, LibraryFilter.Songs -> savedTracks
-        LibraryFilter.MostPlayed -> history
+        LibraryFilter.MostPlayed -> historyStats
+            .sortedWith(compareByDescending<com.spotkofi.app.data.local.LocalMusicStore.HistoryEntry> { it.playCount }
+                .thenByDescending { it.playedAt })
+            .map { it.track }
         else -> emptyList()
     }
 
@@ -182,52 +206,73 @@ fun LibraryScreen(
                 .background(SpotKofiTheme.colors.base),
         ) {
             if (!showLibrarySearch) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = contentPadding,
-                ) {
-                item(key = "header") {
-                    LibraryHeader(
-                        userName = userName,
-                        onOpenProfile = onOpenProfile,
-                        onSearchClick = { showLibrarySearch = true },
-                        onCreate = onCreate,
-                    )
-                }
-
-                item(key = "filters") {
-                    Row(
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Keep the sidebar/profile action, title, and filters pinned
+                    // above the library list. The background lift is animated so
+                    // scrolling into content never creates a hard visual seam.
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(
-                                horizontal = layout.gutter,
-                                vertical = dimens.spaceSm,
-                            ),
-                        horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
+                            .background(headerSurface)
+                            .padding(top = contentPadding.calculateTopPadding()),
                     ) {
-                        LibraryFilter.entries.forEach { option ->
+                        LibraryHeader(
+                            userName = userName,
+                            onOpenProfile = onOpenProfile,
+                            onSearchClick = { showLibrarySearch = true },
+                            onAnalyticsClick = { showAnalytics = !showAnalytics },
+                            analyticsOpen = showAnalytics,
+                            onCreate = onCreate,
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(
+                                    horizontal = layout.gutter,
+                                    vertical = dimens.spaceSm,
+                                ),
+                            horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
+                        ) {
+                            LibraryFilter.entries.forEach { option ->
                                 SpotKofiChip(
                                     label = option.label,
                                     selected = option == filter,
                                     onClick = { filter = option },
                                 )
                             }
+                        }
                     }
-                }
 
-                item(key = "shortcuts") {
-                    LibraryShortcuts(
-                        favoriteCount = savedTracks.size,
-                        followedCount = followedArtists.size,
-                        mostPlayedCount = history.size,
-                        downloadedCount = downloadedTracks.size,
-                        onFavorite = { filter = LibraryFilter.Songs },
-                        onFollowed = { filter = LibraryFilter.Followed },
-                        onMostPlayed = { filter = LibraryFilter.MostPlayed },
-                        onDownloaded = { filter = LibraryFilter.Downloaded },
-                    )
-                }
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(
+                            bottom = contentPadding.calculateBottomPadding(),
+                        ),
+                    ) {
+                        item(key = "shortcuts") {
+                            LibraryShortcuts(
+                                favoriteCount = savedTracks.size,
+                                followedCount = followedArtists.size,
+                                mostPlayedCount = historyStats.sumOf { it.playCount },
+                                downloadedCount = downloadedTracks.size,
+                                onFavorite = { filter = LibraryFilter.Songs },
+                                onFollowed = { filter = LibraryFilter.Followed },
+                                onMostPlayed = { filter = LibraryFilter.MostPlayed },
+                                onDownloaded = { filter = LibraryFilter.Downloaded },
+                            )
+                        }
+
+                        if (showAnalytics) {
+                            item(key = "analytics") {
+                                LibraryAnalytics(
+                                    history = historyStats,
+                                    modifier = Modifier.padding(horizontal = layout.gutter),
+                                )
+                            }
+                        }
 
                 if (showsCollections) {
                     item(key = "collections_heading") {
@@ -346,6 +391,7 @@ fun LibraryScreen(
                 }
 
                 item(key = "footer") { AppFooter() }
+                }
                 }
             } else {
                 LibrarySearchContent(
@@ -541,6 +587,8 @@ private fun LibraryHeader(
     userName: String,
     onOpenProfile: () -> Unit,
     onSearchClick: () -> Unit,
+    onAnalyticsClick: () -> Unit,
+    analyticsOpen: Boolean,
     onCreate: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
@@ -562,6 +610,13 @@ private fun LibraryHeader(
             maxLines = 1,
         )
         Spacer(Modifier.weight(1f))
+        IconButton(onClick = onAnalyticsClick) {
+            Icon(
+                imageVector = Icons.Filled.ShowChart,
+                contentDescription = if (analyticsOpen) "Hide listening stats" else "Open listening stats",
+                tint = if (analyticsOpen) colors.accent else colors.textPrimary,
+            )
+        }
         IconButton(onClick = onSearchClick) {
             Icon(
                 imageVector = Icons.Filled.Search,
@@ -698,6 +753,117 @@ private fun LibraryShortcutPill(
             text = shortcut.count.toString(),
             style = MaterialTheme.typography.labelMedium,
             color = colors.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun LibraryAnalytics(
+    history: List<LocalMusicStore.HistoryEntry>,
+    modifier: Modifier = Modifier,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+    val totalPlays = history.sumOf { it.playCount }
+    val topTracks = remember(history) {
+        history.sortedWith(
+            compareByDescending<LocalMusicStore.HistoryEntry> { it.playCount }
+                .thenByDescending { it.playedAt },
+        ).take(5)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(SpotKofiTheme.shapes.group)
+            .background(colors.card)
+            .padding(dimens.spaceLg),
+    ) {
+        Text(
+            text = "Listening analytics",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary,
+        )
+        Spacer(Modifier.height(dimens.spaceXs))
+        Text(
+            text = "Your local SpotKofi history",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary,
+        )
+        Spacer(Modifier.height(dimens.spaceMd))
+        Row(horizontalArrangement = Arrangement.spacedBy(dimens.spaceXl)) {
+            AnalyticsMetric(value = totalPlays.toString(), label = "plays")
+            AnalyticsMetric(value = history.size.toString(), label = "songs")
+        }
+        if (topTracks.isNotEmpty()) {
+            Spacer(Modifier.height(dimens.spaceLg))
+            Text(
+                text = "Most played",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary,
+            )
+            topTracks.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = dimens.spaceSm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Artwork(
+                        id = entry.track.id,
+                        url = entry.track.artworkUrl,
+                        size = 42.dp,
+                    )
+                    Spacer(Modifier.width(dimens.spaceSm))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = entry.track.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = entry.track.artistName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = "${entry.playCount} plays",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.accent,
+                    )
+                }
+            }
+        } else {
+            Spacer(Modifier.height(dimens.spaceMd))
+            Text(
+                text = "Play a song to start building your stats.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsMetric(value: String, label: String) {
+    Column {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = SpotKofiTheme.colors.accent,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = SpotKofiTheme.colors.textSecondary,
         )
     }
 }

@@ -93,6 +93,13 @@ class CollectionViewModel(
         }
     }
 
+    /** Plays the collection in a new random order atomically, avoiding a toggle/play race. */
+    fun onShuffle() {
+        val shuffled = _uiState.value.tracks.shuffled()
+        val first = shuffled.firstOrNull() ?: return
+        player.play(first, shuffled)
+    }
+
     /** Plays one track, keeping the rest of the collection as the queue. */
     fun onTrackClick(track: Track) {
         player.play(track, _uiState.value.tracks)

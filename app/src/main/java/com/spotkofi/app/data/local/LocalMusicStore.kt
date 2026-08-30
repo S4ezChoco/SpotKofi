@@ -45,6 +45,10 @@ class LocalMusicStore(context: Context) {
     private val _history = MutableStateFlow<List<Track>>(emptyList())
     val history: StateFlow<List<Track>> = _history.asStateFlow()
 
+    /** The same durable history rows with their play count and last-play timestamp. */
+    private val _historyStats = MutableStateFlow<List<HistoryEntry>>(emptyList())
+    val historyStats: StateFlow<List<HistoryEntry>> = _historyStats.asStateFlow()
+
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
 
@@ -454,7 +458,9 @@ class LocalMusicStore(context: Context) {
         _visitedCollections.value = readCollections(db, TABLE_VISITED, "visited_at DESC")
         _savedCollections.value = readCollections(db, TABLE_SAVED_COLLECTIONS, "saved_at DESC")
         _savedTracks.value = readTracks(db, TABLE_SAVED_TRACKS, "saved_at DESC")
-        _history.value = readTracks(db, TABLE_HISTORY, "played_at DESC")
+        val historyRows = readHistoryStats(db)
+        _historyStats.value = historyRows
+        _history.value = historyRows.map { it.track }
         // Only playlists this app created.
         //
         // Saving a provider playlist also writes a collections row of type
@@ -523,6 +529,28 @@ class LocalMusicStore(context: Context) {
     ).use { cursor ->
         buildList {
             while (cursor.moveToNext()) add(cursor.toTrack())
+        }
+    }
+
+    private fun readHistoryStats(db: SQLiteDatabase): List<HistoryEntry> = db.rawQuery(
+        """
+        SELECT t.*, h.play_count, h.played_at
+        FROM $TABLE_TRACKS t
+        INNER JOIN $TABLE_HISTORY h ON h.track_id = t.id
+        ORDER BY h.played_at DESC
+        """.trimIndent(),
+        null,
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(
+                    HistoryEntry(
+                        track = cursor.toTrack(),
+                        playCount = cursor.getInt(cursor.getColumnIndexOrThrow("play_count")),
+                        playedAt = cursor.getLong(cursor.getColumnIndexOrThrow("played_at")),
+                    ),
+                )
+            }
         }
     }
 
@@ -704,6 +732,12 @@ class LocalMusicStore(context: Context) {
 
     private fun android.database.Cursor.getNullableInt(column: String): Int? =
         if (isNull(getColumnIndexOrThrow(column))) null else getInt(getColumnIndexOrThrow(column))
+
+    data class HistoryEntry(
+        val track: Track,
+        val playCount: Int,
+        val playedAt: Long,
+    )
 
     data class LocalDownload(
         val track: Track,

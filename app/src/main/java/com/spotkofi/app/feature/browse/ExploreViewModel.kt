@@ -7,16 +7,18 @@ import com.spotkofi.app.data.model.ChartRegion
 import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.MoodGroup
 import com.spotkofi.app.data.model.MusicChart
-import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -75,7 +77,10 @@ class ExploreViewModel(
     )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    val playbackState: StateFlow<PlaybackState> = player.state
+    /** Only row highlighting needs playback identity; progress belongs to the player. */
+    val playingTrackId: Flow<String?> = player.state
+        .map { it.track?.id }
+        .distinctUntilChanged()
 
     private var regionJob: Job? = null
     private var catalogJob: Job? = null

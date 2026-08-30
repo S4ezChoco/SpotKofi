@@ -1,6 +1,7 @@
 package com.spotkofi.app.data.remote
 
 import android.util.Log
+import com.spotkofi.app.data.local.AudioQuality
 import dev.maxrave.pipepipe.extractor.NewPipe
 import dev.maxrave.pipepipe.extractor.ServiceList
 import dev.maxrave.pipepipe.extractor.downloader.CancellableCall
@@ -9,6 +10,7 @@ import dev.maxrave.pipepipe.extractor.downloader.Request
 import dev.maxrave.pipepipe.extractor.downloader.Response
 import dev.maxrave.pipepipe.extractor.exceptions.ReCaptchaException
 import dev.maxrave.pipepipe.extractor.search.SearchInfo
+import dev.maxrave.pipepipe.extractor.stream.AudioStream
 import dev.maxrave.pipepipe.extractor.stream.StreamInfo
 import dev.maxrave.pipepipe.extractor.stream.StreamInfoItem
 import okhttp3.HttpUrl
@@ -101,7 +103,7 @@ internal class YouTubeStreamExtractor {
         Log.e(TAG, "YouTube HTML search failed for $query", error)
     }.getOrNull()
 
-    fun getAudioUrl(videoId: String): String? {
+    fun getAudioUrl(videoId: String, quality: AudioQuality = AudioQuality.Automatic): String? {
         if (videoId.isBlank()) return null
 
         return runCatching {
@@ -110,10 +112,25 @@ internal class YouTubeStreamExtractor {
                 ServiceList.YouTube,
                 "https://music.youtube.com/watch?v=$videoId",
             )
-            info.audioStreams
+            val streams = info.audioStreams
                 .asSequence()
-                .map { it.content }
-                .firstOrNull { it.isNotBlank() }
+                .filter { it.content.isNotBlank() }
+                .toList()
+            val selected = when (quality) {
+                AudioQuality.High -> streams.maxWithOrNull(
+                    compareBy<AudioStream> { it.averageBitrate.takeIf { value -> value > 0 } ?: it.bitrate }
+                        .thenBy { it.bitrate },
+                )
+                AudioQuality.Low -> streams.minWithOrNull(
+                    compareBy<AudioStream> { it.averageBitrate.takeIf { value -> value > 0 } ?: it.bitrate }
+                        .thenBy { it.bitrate },
+                )
+                AudioQuality.Automatic -> streams.maxWithOrNull(
+                    compareBy<AudioStream> { it.averageBitrate.takeIf { value -> value > 0 } ?: it.bitrate }
+                        .thenBy { it.bitrate },
+                )
+            }
+            selected?.content
         }.onFailure { error ->
             Log.e(TAG, "Unable to resolve YouTube audio for $videoId", error)
         }.getOrNull()

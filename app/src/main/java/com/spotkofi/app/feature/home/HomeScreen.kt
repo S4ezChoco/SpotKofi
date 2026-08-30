@@ -1,5 +1,6 @@
 package com.spotkofi.app.feature.home
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +50,7 @@ import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.HomeSkeleton
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ErrorState
-import com.spotkofi.app.ui.components.ProfileAvatar
+import com.spotkofi.app.ui.components.SpotKofiLogo
 import com.spotkofi.app.ui.components.QuickPickCard
 import com.spotkofi.app.ui.components.ReleaseCard
 import com.spotkofi.app.ui.components.SectionHeader
@@ -62,8 +63,12 @@ import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.layout.ResponsiveLayout
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
 import com.spotkofi.app.ui.motion.staggeredEntry
+import com.spotkofi.app.ui.theme.Motion
+import com.spotkofi.app.ui.theme.SpotKofiBrandStyle
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import com.spotkofi.app.ui.theme.headerWash
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,7 +89,9 @@ fun HomeScreen(
         )
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val playingTrackId by remember(container.playerController.state) {
+        container.playerController.state.map { it.track?.id }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
     val savedTracks by container.localStore.savedTracks.collectAsStateWithLifecycle()
     val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
     val playlists by container.localStore.playlists.collectAsStateWithLifecycle()
@@ -118,7 +125,7 @@ fun HomeScreen(
                 onTrackMore = { selectedTrack = it },
                 onMoodClick = viewModel::onMoodClick,
                 onRegionClick = { showRegionPicker = true },
-                playingTrackId = playback.track?.id,
+                playingTrackId = playingTrackId,
                 onOpenProfile = onOpenProfile,
                 onRetry = viewModel::retry,
                 contentPadding = contentPadding,
@@ -206,6 +213,17 @@ private fun HomeContent(
         }
     }
 
+    val headerLifted by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 4
+        }
+    }
+    val headerSurface by animateColorAsState(
+        targetValue = if (headerLifted) colors.base else colors.base.copy(alpha = 0.78f),
+        animationSpec = Motion.fast(),
+        label = "homeStickyHeader",
+    )
+
     // Tinted from the first quick pick so the wash relates to what is on screen.
     val washTint = remember(state.quickPicks.firstOrNull()?.id) {
         state.quickPicks.firstOrNull()?.id?.let(::artworkSeedColor)
@@ -222,14 +240,16 @@ private fun HomeContent(
             )
         }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding,
-        ) {
-            // Avatar and chips share one row. There is no greeting: the header IS
-            // the filter bar.
-            item(key = "header") {
+        // Keep the profile/sidebar action and feed filters attached to the top
+        // chrome while the shelves scroll underneath. The surface only becomes
+        // opaque once content is behind it, so resting Home still feels airy.
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(headerSurface)
+                    .padding(top = contentPadding.calculateTopPadding()),
+            ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     HomeHeader(
                         state = state,
@@ -241,6 +261,13 @@ private fun HomeContent(
                 }
             }
 
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(
+                    bottom = contentPadding.calculateBottomPadding(),
+                ),
+            ) {
             if (state.isLoading) {
                 item(key = "loading") {
                     HomeSkeleton(
@@ -380,6 +407,7 @@ private fun HomeContent(
             }
 
             item(key = "footer") { AppFooter() }
+            }
         }
     }
 }
@@ -393,26 +421,27 @@ private fun HomeHeader(
 ) {
     val dimens = SpotKofiTheme.dimens
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = dimens.spaceMd, bottom = dimens.spaceSm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Spacer(Modifier.width(gutter))
-        ProfileAvatar(name = state.userName, onClick = onOpenProfile, size = 32.dp)
-        Spacer(Modifier.width(dimens.spaceMd))
-
-        // One chip per feed, driven by the enum.
-        //
-        // This used to be a hand-written list with Music and Following fused into a
-        // segmented control. Following had no working feed behind it - every card it
-        // drew ignored taps - so the control is gone and the row is a plain,
-        // uniform set of filters again.
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = gutter, vertical = dimens.spaceMd),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SpotKofiLogo(onClick = onOpenProfile, size = 40.dp)
+            Spacer(Modifier.width(dimens.spaceMd))
+            Text(
+                text = "SpotKofi",
+                style = SpotKofiBrandStyle,
+                color = SpotKofiTheme.colors.accent,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(end = gutter),
+                .padding(start = gutter, end = gutter, bottom = dimens.spaceSm),
             horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
         ) {

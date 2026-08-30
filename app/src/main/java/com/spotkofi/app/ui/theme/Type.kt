@@ -30,6 +30,15 @@ import androidx.compose.ui.unit.sp
  */
 private val AppFont = FontFamily.SansSerif
 
+/** Rounded handwritten display style used only for the café/lofi brand mark. */
+val SpotKofiBrandStyle = TextStyle(
+    fontFamily = FontFamily.Cursive,
+    fontWeight = FontWeight.Bold,
+    fontSize = 23.sp,
+    lineHeight = 27.sp,
+    letterSpacing = 0.2.sp,
+)
+
 /** Big screen titles: playlist name on a detail header, "Good evening". */
 val DisplayLarge = TextStyle(
     fontFamily = AppFont,

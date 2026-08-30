@@ -18,13 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ShowChart
-import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -103,15 +98,10 @@ fun ProfileDrawer(
 
         Spacer(Modifier.height(dimens.spaceSm))
 
-        // ---- Account menu ----
-        DrawerRow(Icons.Filled.Add, "Add account", index = 0)
-        // No subscription tier shown: there is no account system yet, so a plan
-        // badge here would be inventing state the app does not have.
-        DrawerRow(Icons.Filled.WorkspacePremium, "Subscription", index = 1)
-        DrawerRow(Icons.Filled.ShowChart, "Listening stats", index = 2)
-        DrawerRow(Icons.Filled.History, "Recents", index = 3)
-        DrawerRow(Icons.Filled.Campaign, "Your Updates", index = 4)
-        DrawerRow(Icons.Filled.Settings, "Settings and privacy", index = 5, onClick = onSettings)
+        // Account, subscription and social-update rows are intentionally omitted:
+        // SpotKofi has no account backend for them yet, so exposing dead controls
+        // would make the drawer appear broken.
+        DrawerRow(Icons.Filled.Settings, "Settings and privacy", index = 0, onClick = onSettings)
 
         Spacer(Modifier.height(dimens.spaceLg))
 
