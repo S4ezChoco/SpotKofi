@@ -1,8 +1,6 @@
 package com.spotkofi.app.ui.components
 
-import android.os.Build
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -29,8 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
@@ -202,19 +198,15 @@ private fun LyricLineRow(
         animationSpec = tween(320),
         label = "lyricAlpha",
     )
-    val blurRadius by animateDpAsState(
-        targetValue = if (isActive || !BlurSupported) {
-            0.dp
-        } else {
-            (weightedDistance * 1.1f).coerceAtMost(5f).dp
-        },
-        animationSpec = tween(320),
-        label = "lyricBlur",
-    )
     val color by animateColorAsState(
         targetValue = if (isActive) colors.textPrimary else colors.textSecondary,
         animationSpec = tween(320),
         label = "lyricColor",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (isActive) 1f else 0.97f,
+        animationSpec = tween(240),
+        label = "lyricScale",
     )
 
     Box(
@@ -227,18 +219,11 @@ private fun LyricLineRow(
                     Modifier
                 },
             )
-            // Alpha before blur: blurring an already-translucent layer smears it
-            // instead of softening it.
-            .graphicsLayer { this.alpha = alpha }
-            .then(
-                if (blurRadius > 0.dp) {
-                    Modifier.blur(blurRadius, BlurredEdgeTreatment.Unbounded)
-                } else {
-                    Modifier
-                },
-            )
-            // Padding inside the blurred box, so the blur is not sliced flat at the
-            // screen edge.
+            .graphicsLayer {
+                this.alpha = alpha
+                scaleX = scale
+                scaleY = scale
+            }
             .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceXxs),
     ) {
         Text(
@@ -269,12 +254,6 @@ private fun LyricsMessage(text: String, modifier: Modifier = Modifier) {
         )
     }
 }
-
-/**
- * `Modifier.blur` is documented as a no-op below API 31, so the depth cue falls
- * back to opacity alone there rather than pretending to blur.
- */
-private val BlurSupported: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
 /**
  * Index of the line currently being sung, or -1 before the first one.

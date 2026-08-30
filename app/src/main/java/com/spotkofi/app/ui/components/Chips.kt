@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -53,14 +54,19 @@ fun SpotKofiChip(
     val dimens = SpotKofiTheme.dimens
 
     val background by animateColorAsState(
-        targetValue = if (selected) colors.accent else colors.chip,
+        targetValue = if (selected) colors.highlight else Color.Transparent,
         animationSpec = tween(CHIP_ANIM_MS),
         label = "chipBackground",
     )
     val content by animateColorAsState(
-        targetValue = if (selected) colors.onAccent else colors.textPrimary,
+        targetValue = colors.textPrimary,
         animationSpec = tween(CHIP_ANIM_MS),
         label = "chipContent",
+    )
+    val outline by animateColorAsState(
+        targetValue = if (selected) Color.Transparent else colors.textSecondary,
+        animationSpec = tween(CHIP_ANIM_MS),
+        label = "chipOutline",
     )
 
     Box(
@@ -68,6 +74,7 @@ fun SpotKofiChip(
             .height(dimens.chipHeight)
             .clip(shape)
             .background(background)
+            .border(1.dp, outline, shape)
             .selectable(selected = selected, onClick = onClick)
             .padding(horizontal = dimens.spaceLg),
         contentAlignment = Alignment.Center,

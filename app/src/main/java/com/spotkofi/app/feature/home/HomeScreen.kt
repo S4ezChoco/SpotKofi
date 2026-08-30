@@ -19,8 +19,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -36,9 +38,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.spotkofi.app.core.LocalAppContainer
+import com.spotkofi.app.data.model.HomeQuickPick
 import com.spotkofi.app.data.model.HomeSection
-import com.spotkofi.app.data.model.HomeTab
-import com.spotkofi.app.data.model.MediaCollection
+import com.spotkofi.app.data.model.MoodCategory
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.data.repository.previewHomeSections
@@ -64,6 +66,7 @@ import com.spotkofi.app.ui.theme.SpotKofiTheme
 import com.spotkofi.app.ui.theme.headerWash
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onCollectionClick: (String) -> Unit,
@@ -77,6 +80,7 @@ fun HomeScreen(
             container.musicRepository,
             container.playerController,
             container.localStore,
+            container.settingsStore,
         )
     }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -86,24 +90,37 @@ fun HomeScreen(
     val playlists by container.localStore.playlists.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
+    var showRegionPicker by remember { mutableStateOf(false) }
 
     // Indexed once per change instead of scanned per row, so a long shelf does not
     // do a linear search for every visible track.
     val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
 
     androidx.compose.foundation.layout.Box(modifier = modifier.fillMaxSize()) {
-        HomeContent(
-            state = state,
-            onChipClick = viewModel::onChipClick,
-            onCollectionClick = onCollectionClick,
-            onTrackClick = viewModel::onPlayTrack,
-            onTrackMore = { selectedTrack = it },
-            playingTrackId = playback.track?.id,
-            onOpenProfile = onOpenProfile,
-            onRetry = viewModel::retry,
-            contentPadding = contentPadding,
-            downloads = downloadsByTrack,
-        )
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            HomeContent(
+                state = state,
+                onChipClick = viewModel::onFilterClick,
+                onCollectionClick = onCollectionClick,
+                onQuickPickClick = { pick ->
+                    pick.track?.let(viewModel::onPlayTrack)
+                    pick.collectionId?.let(onCollectionClick)
+                },
+                onTrackClick = viewModel::onPlayTrack,
+                onTrackMore = { selectedTrack = it },
+                onMoodClick = viewModel::onMoodClick,
+                onRegionClick = { showRegionPicker = true },
+                playingTrackId = playback.track?.id,
+                onOpenProfile = onOpenProfile,
+                onRetry = viewModel::retry,
+                contentPadding = contentPadding,
+                downloads = downloadsByTrack,
+            )
+        }
 
         val track = selectedTrack
         TrackActionsSheet(
@@ -132,16 +149,31 @@ fun HomeScreen(
                 }
             },
         )
+
+        if (showRegionPicker) {
+            HomeRegionDialog(
+                regions = state.chartRegions,
+                selectedCode = state.regionCode,
+                onSelect = { code ->
+                    viewModel.onRegionSelected(code)
+                    showRegionPicker = false
+                },
+                onDismiss = { showRegionPicker = false },
+            )
+        }
     }
 }
 
 @Composable
 private fun HomeContent(
     state: HomeViewModel.UiState,
-    onChipClick: (HomeTab) -> Unit,
+    onChipClick: (HomeFilter) -> Unit,
     onCollectionClick: (String) -> Unit,
+    onQuickPickClick: (HomeQuickPick) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
     onTrackMore: (Track) -> Unit = {},
+    onMoodClick: (MoodCategory) -> Unit = {},
+    onRegionClick: () -> Unit = {},
     playingTrackId: String?,
     onOpenProfile: () -> Unit,
     onRetry: () -> Unit,
@@ -250,7 +282,7 @@ private fun HomeContent(
                         )
                         Spacer(Modifier.height(dimens.spaceXs))
                         Text(
-                            text = "The ${state.selectedChip.label} feed has no content " +
+                            text = "The ${state.selectedFilter.label} feed has no content " +
                                 "from the catalog right now.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.textSecondary,
@@ -279,11 +311,11 @@ private fun HomeContent(
                                 horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
                             ) {
                                 row.forEach { item ->
-                                    QuickPickCard(
-                                        item = item,
-                                        onClick = { onCollectionClick(item.id) },
-                                        modifier = Modifier.weight(1f),
-                                    )
+                                        QuickPickCard(
+                                            item = item,
+                                            onClick = { onQuickPickClick(item) },
+                                            modifier = Modifier.weight(1f),
+                                        )
                                 }
                                 // Keeps a short final row aligned with those above.
                                 repeat(layout.gridColumns - row.size) {
@@ -298,25 +330,50 @@ private fun HomeContent(
                 }
             }
 
-            state.sections.forEachIndexed { index, section ->
-                item(key = section.id) {
-                    // A LazyColumn item is a single slot, so the block and its
-                    // trailing gap need a layout around them.
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .staggeredEntry(index + 2),
-                    ) {
-                        HomeSectionBlock(
-                            section = section,
-                            layout = layout,
-                            onCollectionClick = onCollectionClick,
-                            onTrackClick = onTrackClick,
-                            onTrackMore = onTrackMore,
-                            playingTrackId = playingTrackId,
-                            downloads = downloads,
-                        )
-                        Spacer(Modifier.height(dimens.shelfSpacing))
+            if (
+                state.selectedFilter == HomeFilter.All ||
+                state.selectedMood != null ||
+                state.isMoodLoading
+            ) {
+                item(key = "home_explore") {
+                    HomeExploreSections(
+                        state = state,
+                        layout = layout,
+                        playingTrackId = playingTrackId,
+                        onCollectionClick = onCollectionClick,
+                        onTrackClick = onTrackClick,
+                        onTrackMore = onTrackMore,
+                        onMoodClick = onMoodClick,
+                        onRegionClick = onRegionClick,
+                    )
+                }
+            }
+
+            if (
+                state.selectedFilter == HomeFilter.All &&
+                state.selectedMood == null &&
+                !state.isMoodLoading
+            ) {
+                state.sections.forEachIndexed { index, section ->
+                    item(key = section.id) {
+                        // A LazyColumn item is a single slot, so the block and its
+                        // trailing gap need a layout around them.
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .staggeredEntry(index + 2),
+                        ) {
+                            HomeSectionBlock(
+                                section = section,
+                                layout = layout,
+                                onCollectionClick = onCollectionClick,
+                                onTrackClick = onTrackClick,
+                                onTrackMore = onTrackMore,
+                                playingTrackId = playingTrackId,
+                                downloads = downloads,
+                            )
+                            Spacer(Modifier.height(dimens.shelfSpacing))
+                        }
                     }
                 }
             }
@@ -330,7 +387,7 @@ private fun HomeContent(
 private fun HomeHeader(
     state: HomeViewModel.UiState,
     gutter: androidx.compose.ui.unit.Dp,
-    onChipClick: (HomeTab) -> Unit,
+    onChipClick: (HomeFilter) -> Unit,
     onOpenProfile: () -> Unit,
 ) {
     val dimens = SpotKofiTheme.dimens
@@ -358,11 +415,11 @@ private fun HomeHeader(
             horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HomeTab.entries.forEach { tab ->
+            HomeFilter.entries.forEach { filter ->
                 SpotKofiChip(
-                    label = tab.label,
-                    selected = state.selectedChip == tab,
-                    onClick = { onChipClick(tab) },
+                    label = filter.label,
+                    selected = state.selectedFilter == filter,
+                    onClick = { onChipClick(filter) },
                 )
             }
         }
@@ -494,12 +551,13 @@ private fun HomePreview() {
         HomeContent(
             state = HomeViewModel.UiState(
                 userName = "kofi_listener",
-                quickPicks = previewQuickPicks(),
+                quickPicks = previewQuickPicks().map(HomeQuickPick::fromCollection),
                 sections = previewHomeSections(),
                 isLoading = false,
             ),
             onChipClick = {},
             onCollectionClick = {},
+            onQuickPickClick = {},
             onTrackClick = { _, _ -> },
             playingTrackId = null,
             onOpenProfile = {},
@@ -516,11 +574,12 @@ private fun HomeEmptyPreview() {
         HomeContent(
             state = HomeViewModel.UiState(
                 userName = "kofi_listener",
-                selectedChip = HomeTab.Podcasts,
+                selectedFilter = HomeFilter.Sad,
                 isLoading = false,
             ),
             onChipClick = {},
             onCollectionClick = {},
+            onQuickPickClick = {},
             onTrackClick = { _, _ -> },
             playingTrackId = null,
             onOpenProfile = {},

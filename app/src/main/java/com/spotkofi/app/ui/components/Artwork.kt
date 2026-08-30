@@ -8,7 +8,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,38 +26,31 @@ import com.spotkofi.app.ui.theme.ArtworkSeeds
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlin.math.absoluteValue
 
-/**
- * Builds a stable two-stop gradient for an item id.
- *
- * Deterministic on purpose: the same playlist always gets the same colours
- * across launches and inside `@Preview`, so the UI looks designed rather than
- * random. The second stop is the seed pushed towards black, which mimics how
- * real cover art tends to sit dark at the bottom.
- */
+/** Builds a stable two-stop gradient for an item id. */
 fun artworkBrush(id: String): Brush {
     val top = artworkSeedColor(id)
     val bottom = lerp(top, Color.Black, 0.55f)
     return Brush.linearGradient(listOf(top, bottom))
 }
 
-/**
- * The dominant colour for an item id.
- *
- * Detail screens tint their header with this so the scrim reads as if it were
- * sampled from the cover art, which is what Spotify does with real artwork.
- */
+/** The dominant colour for an item id. */
 fun artworkSeedColor(id: String): Color {
     val hash = id.hashCode().absoluteValue
     return ArtworkSeeds[hash % ArtworkSeeds.size]
 }
 
 /**
- * Cover art for any media item.
- *
- * Falls back to [artworkBrush] whenever [url] is null, which is the whole of
- * Phase 1. That keeps every screen renderable with no network and no bundled
- * image assets.
+ * Requests the largest useful variant from the common provider URL formats.
+ * iTunes and YouTube Music often return tiny card thumbnails even when a larger
+ * variant is available at the same URL; using that tiny bitmap in the player is
+ * what made otherwise valid covers look pixelated.
  */
+private fun optimizedArtworkUrl(url: String): String = url.trim()
+    .replace(Regex("\\d+x\\d+(?=bb)"), "1200x1200")
+    .replace(Regex("w\\d+-h\\d+"), "w1200-h1200")
+    .replace(Regex("=w\\d+(?=-|$)"), "=w1200")
+
+/** Cover art with a deterministic, non-letter fallback for missing or failed URLs. */
 @Composable
 fun Artwork(
     id: String,
@@ -64,28 +60,30 @@ fun Artwork(
     contentDescription: String? = null,
 ) {
     val brush = remember(id) { artworkBrush(id) }
+    val displayUrl = remember(url) {
+        url?.takeIf { it.isNotBlank() }?.let(::optimizedArtworkUrl)
+    }
+    var imageFailed by remember(displayUrl) { mutableStateOf(false) }
 
-    // A null contentDescription marks the artwork as decorative, which is
-    // correct in lists: the adjacent title text already carries the meaning for
-    // screen readers, and announcing both would be redundant.
     Box(
         modifier = modifier
             .clip(shape)
             .background(brush),
         contentAlignment = Alignment.Center,
     ) {
-        if (url != null) {
+        if (displayUrl != null && !imageFailed) {
             AsyncImage(
-                model = url,
+                model = displayUrl,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
+                onError = { imageFailed = true },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             Icon(
                 imageVector = Icons.Filled.MusicNote,
                 contentDescription = contentDescription,
-                tint = Color.White.copy(alpha = 0.22f),
+                tint = Color.White.copy(alpha = 0.34f),
                 modifier = Modifier.fillMaxSize(0.34f),
             )
         }
@@ -107,6 +105,6 @@ fun Artwork(
         url = url,
         shape = shape,
         contentDescription = contentDescription,
-        modifier = modifier.size(size),
+        modifier = modifier.then(Modifier.size(size)),
     )
 }

@@ -17,22 +17,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -51,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -111,6 +103,10 @@ fun CollectionScreen(
             playback = playback,
             onBack = onBack,
             onPlayAll = viewModel::onPlayAll,
+            onShuffle = {
+                container.playerController.toggleShuffle()
+                viewModel.onPlayAll()
+            },
             onTrackClick = viewModel::onTrackClick,
             onTrackMore = { selectedTrack = it },
             isCollectionSaved = state.collection?.let { collection ->
@@ -161,6 +157,7 @@ private fun CollectionContent(
     playback: PlaybackState,
     onBack: () -> Unit,
     onPlayAll: () -> Unit,
+    onShuffle: () -> Unit = {},
     onTrackClick: (Track) -> Unit,
     onTrackMore: (Track) -> Unit = {},
     isCollectionSaved: Boolean = false,
@@ -276,20 +273,17 @@ private fun CollectionContent(
 
                     MetaRow(collection = collection, tracks = state.tracks)
 
+                    CollectionDescription(collection = collection)
+
                     Spacer(Modifier.height(dimens.spaceMd))
 
                     ActionRow(
-                        collectionId = collection.id,
-                        artworkUrl = collection.artworkUrl,
                         isPlaying = playback.isPlaying &&
                             playback.track?.id in state.tracks.map { it.id },
                         onPlayAll = onPlayAll,
+                        onShuffle = onShuffle,
                         onDownloadAll = onDownloadAll,
                     )
-
-                    Spacer(Modifier.height(dimens.spaceMd))
-
-                    ActionPills()
 
                     Spacer(Modifier.height(dimens.spaceLg))
                 }
@@ -403,16 +397,29 @@ private fun MetaRow(collection: MediaCollection, tracks: List<Track>) {
     }
 }
 
-/**
- * Download, share and more on the left; shuffle and the big play button on the
- * right. The leading thumbnail previews the first track in the running order.
- */
+@Composable
+private fun CollectionDescription(collection: MediaCollection) {
+    val description = (collection as? Playlist)?.description?.takeIf { it.isNotBlank() }
+        ?: return
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+
+    Text(
+        text = description,
+        style = MaterialTheme.typography.bodyMedium,
+        color = colors.textSecondary,
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(horizontal = dimens.screenGutter),
+    )
+}
+
+/** Download, shuffle and play controls for the collection. */
 @Composable
 private fun ActionRow(
-    collectionId: String,
-    artworkUrl: String?,
     isPlaying: Boolean,
     onPlayAll: () -> Unit,
+    onShuffle: () -> Unit,
     onDownloadAll: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
@@ -424,102 +431,28 @@ private fun ActionRow(
             .padding(horizontal = dimens.screenGutter),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Artwork(id = collectionId + "_thumb", size = 30.dp, url = artworkUrl)
-
-        Spacer(Modifier.width(dimens.spaceMd))
-
-        Icon(
-            imageVector = Icons.Outlined.FileDownload,
-            contentDescription = "Download",
-            tint = colors.textSecondary,
-            modifier = Modifier
-                .size(26.dp)
-                .clickable(onClick = onDownloadAll),
-        )
-
-        Spacer(Modifier.width(dimens.spaceLg))
-
-        Icon(
-            imageVector = Icons.Filled.Share,
-            contentDescription = "Share",
-            tint = colors.textSecondary,
-            modifier = Modifier
-                .size(22.dp)
-                .clickable { /* Phase 4: share sheet */ },
-        )
-
-        Spacer(Modifier.width(dimens.spaceLg))
-
-        Icon(
-            imageVector = Icons.Filled.MoreVert,
-            contentDescription = stringResource(R.string.cd_more_options),
-            tint = colors.textSecondary,
-            modifier = Modifier
-                .size(22.dp)
-                .clickable { /* Phase 5: collection context sheet */ },
-        )
-
+        IconButton(onClick = onDownloadAll) {
+            Icon(
+                imageVector = Icons.Outlined.FileDownload,
+                contentDescription = "Download",
+                tint = colors.textSecondary,
+                modifier = Modifier.size(dimens.iconMd),
+            )
+        }
         Spacer(Modifier.weight(1f))
-
-        Icon(
-            imageVector = Icons.Filled.Shuffle,
-            contentDescription = stringResource(R.string.cd_shuffle),
-            tint = colors.textSecondary,
-            modifier = Modifier
-                .size(26.dp)
-                .clickable { /* Phase 5: shuffle the queue */ },
-        )
-
-        Spacer(Modifier.width(dimens.spaceLg))
-
+        IconButton(onClick = onShuffle) {
+            Icon(
+                imageVector = Icons.Filled.Shuffle,
+                contentDescription = stringResource(R.string.cd_shuffle),
+                tint = colors.textPrimary,
+                modifier = Modifier.size(dimens.iconMd),
+            )
+        }
+        Spacer(Modifier.width(dimens.spaceSm))
         PlayButton(
             isPlaying = isPlaying,
             onClick = onPlayAll,
             size = dimens.playButtonLg,
-        )
-    }
-}
-
-/** Add / Mix / Video / Edit pills. */
-@Composable
-private fun ActionPills() {
-    val dimens = SpotKofiTheme.dimens
-
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = dimens.screenGutter),
-        horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-    ) {
-        item { ActionPill(Icons.Filled.Add, "Add") }
-        item { ActionPill(Icons.Filled.Tune, "Mix") }
-        item { ActionPill(Icons.Filled.VideoLibrary, "Video") }
-        item { ActionPill(Icons.Filled.Edit, "Edit") }
-    }
-}
-
-@Composable
-private fun ActionPill(icon: ImageVector, label: String) {
-    val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
-
-    Row(
-        modifier = Modifier
-            .height(dimens.chipHeight + 4.dp)
-            .background(colors.chip, SpotKofiTheme.shapes.chip)
-            .clickable { /* Phase 5 */ }
-            .padding(horizontal = dimens.spaceLg),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = colors.textPrimary,
-            modifier = Modifier.size(dimens.iconSm),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = colors.textPrimary,
         )
     }
 }

@@ -1,12 +1,14 @@
 package com.spotkofi.app.ui.components
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -52,7 +55,7 @@ fun QueueSheet(
     queue: List<Track>,
     currentTrackId: String?,
     onDismiss: () -> Unit,
-    onRemove: (String) -> Unit,
+    onRemove: (Int) -> Unit,
     onMove: (Int, Int) -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
@@ -88,6 +91,7 @@ fun QueueSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .fillMaxHeight(0.76f)
                     .navigationBarsPadding()
                     .padding(dimens.spaceSm)
                     .background(colors.elevated, RoundedCornerShape(dimens.floatingBarRadius))
@@ -109,14 +113,20 @@ fun QueueSheet(
                         Icon(Icons.Filled.Close, contentDescription = "Close queue", tint = colors.textSecondary)
                     }
                 }
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    itemsIndexed(queue, key = { index, track -> "${track.id}_$index" }) { index, track ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
+                AnimatedContent(
+                    targetState = queue,
+                    transitionSpec = { fadeIn(Motion.fast()) togetherWith fadeOut(Motion.fast()) },
+                    modifier = Modifier.weight(1f),
+                    label = "queueRows",
+                ) { displayedQueue ->
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        itemsIndexed(displayedQueue, key = { index, track -> "${track.id}#$index" }) { index, track ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
                                 .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceXs),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -148,7 +158,7 @@ fun QueueSheet(
                             ) {
                                 Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down", tint = colors.textSecondary)
                             }
-                            IconButton(onClick = { onRemove(track.id) }) {
+                            IconButton(onClick = { onRemove(index) }) {
                                 Icon(Icons.Filled.DeleteOutline, contentDescription = "Remove from queue", tint = colors.textSecondary)
                             }
                         }
@@ -157,4 +167,5 @@ fun QueueSheet(
             }
         }
     }
+}
 }

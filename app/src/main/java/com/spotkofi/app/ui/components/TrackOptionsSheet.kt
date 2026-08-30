@@ -25,12 +25,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +76,9 @@ fun TrackOptionsSheet(
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
     onShare: (Track) -> Unit,
+    onOpenLyrics: (() -> Unit)? = null,
+    onOpenDetails: (() -> Unit)? = null,
+    onStop: (() -> Unit)? = null,
     onDownload: ((Track) -> Unit)? = null,
     downloadStatus: DownloadManagerStatus? = null,
     /** Percent transferred, shown while a download is running or paused. */
@@ -125,6 +131,13 @@ fun TrackOptionsSheet(
                     )
                     .padding(vertical = dimens.spaceMd),
             ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .size(width = 36.dp, height = 4.dp)
+                        .background(colors.divider, RoundedCornerShape(2.dp)),
+                )
+                Spacer(Modifier.size(dimens.spaceXs))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -192,6 +205,28 @@ fun TrackOptionsSheet(
                         },
                     )
                 }
+                onOpenLyrics?.let { openLyrics ->
+                    OptionRow(
+                        index = row++,
+                        icon = Icons.Filled.Lyrics,
+                        label = "Lyrics",
+                        onClick = {
+                            onDismiss()
+                            openLyrics()
+                        },
+                    )
+                }
+                onOpenDetails?.let { openDetails ->
+                    OptionRow(
+                        index = row++,
+                        icon = Icons.Filled.Info,
+                        label = "About this song",
+                        onClick = {
+                            onDismiss()
+                            openDetails()
+                        },
+                    )
+                }
                 OptionRow(
                     index = row++,
                     icon = Icons.Filled.Shuffle,
@@ -237,6 +272,17 @@ fun TrackOptionsSheet(
                         onClick = {
                             onDismiss()
                             onOpenArtist(artistId)
+                        },
+                    )
+                }
+                onStop?.let { stop ->
+                    OptionRow(
+                        index = row++,
+                        icon = Icons.Filled.Stop,
+                        label = "Stop playback",
+                        onClick = {
+                            stop()
+                            onDismiss()
                         },
                     )
                 }

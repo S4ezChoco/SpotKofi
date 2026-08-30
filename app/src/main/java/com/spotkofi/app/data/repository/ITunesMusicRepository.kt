@@ -94,7 +94,10 @@ class ItunesMusicRepository internal constructor(
     }
 
     override suspend fun homeSections(tab: HomeTab): List<HomeSection> = coroutineScope {
-        val youtubeSections = runCatalog { youtubeHomeClient.sections(tab) }.orEmpty()
+        val region = settingsProvider().contentRegion
+        val youtubeSections = runCatalog {
+            youtubeHomeClient.sections(tab, country = region)
+        }.orEmpty()
         if (youtubeSections.isNotEmpty()) return@coroutineScope youtubeSections
 
         when (tab) {
@@ -196,7 +199,7 @@ class ItunesMusicRepository internal constructor(
         val term = query.trim()
         if (term.length < MIN_SEARCH_LENGTH) return@coroutineScope SearchResults()
 
-        val key = term.lowercase()
+        val key = "${settingsProvider().contentRegion}:${term.lowercase()}:${settingsProvider().hideExplicitContent}"
         searchCache[key]?.let { return@coroutineScope it }
 
         val region = settingsProvider().contentRegion
@@ -376,6 +379,7 @@ class ItunesMusicRepository internal constructor(
         // fetched alongside the rest and allowed to fail on their own. A missing
         // lyric sheet must never cost the user the album and artist rows.
         val lyricsEnabled = settingsProvider().lyricsEnabled
+        val lyricsProvider = settingsProvider().lyricsProvider
         val lyrics = async {
             if (!lyricsEnabled) return@async null
             runCatalog {
@@ -384,6 +388,7 @@ class ItunesMusicRepository internal constructor(
                     artistName = track.artistName,
                     albumTitle = track.albumTitle,
                     durationMs = track.durationMs,
+                    provider = lyricsProvider,
                 )
             }
         }
@@ -416,6 +421,7 @@ class ItunesMusicRepository internal constructor(
                     plain = result.plain,
                     synced = result.synced,
                     instrumental = result.instrumental,
+                    providerName = result.providerName,
                 )
             },
             credits = credits.await()?.takeIf { it.hasAny },
@@ -430,7 +436,8 @@ class ItunesMusicRepository internal constructor(
     // ---------------------------------------------------------------- internals
 
     private suspend fun cachedTracks(term: String, limit: Int): List<Track> {
-        val key = "tracks:${term.trim().lowercase()}:$limit"
+        val region = settingsProvider().contentRegion
+        val key = "tracks:$region:${term.trim().lowercase()}:$limit"
         tracksCache[key]?.let { return it }
 
         // YouTube Music owns the result identity and metadata so every visible
@@ -493,7 +500,8 @@ class ItunesMusicRepository internal constructor(
     }
 
     private suspend fun cachedAlbums(term: String, limit: Int): List<Album> {
-        val key = "albums:${term.trim().lowercase()}:$limit"
+        val region = settingsProvider().contentRegion
+        val key = "albums:$region:${term.trim().lowercase()}:$limit"
         albumsCache[key]?.let { return it }
         val albums = ItunesMapper.toAlbums(
             itunes.search(term = term, entity = "album", limit = limit),

@@ -71,6 +71,10 @@ class ExternalLinkPlayerController(context: Context) : PlayerController {
         // External YouTube playback owns its own seek bar.
     }
 
+    override fun seekTo(positionMs: Long) {
+        // External YouTube playback owns its own seek bar.
+    }
+
     override fun toggleShuffle() {
         _state.update { it.copy(isShuffled = !it.isShuffled) }
     }

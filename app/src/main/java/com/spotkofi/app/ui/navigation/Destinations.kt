@@ -68,20 +68,9 @@ data class MoodRoute(val title: String, val params: String)
 @Serializable
 data object SettingsRoute
 
-/**
- * The four items in the bottom bar.
- *
- * [Create] is deliberately in this list even though it is not a route: in the
- * real app it sits in the bar as a peer of the three tabs but opens a modal
- * sheet. Modelling it as a nav destination would put a bogus entry on the back
- * stack, so the bar reports the tap and the caller decides what to do.
- */
+/** The three persistent items in the bottom bar. */
 enum class TopLevelDestination(val labelRes: Int) {
     Home(R.string.nav_home),
     Search(R.string.nav_search),
     Library(R.string.nav_library),
-    Create(R.string.nav_create),
-    ;
-
-    val isAction: Boolean get() = this == Create
 }

@@ -9,9 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +47,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +69,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -106,9 +105,9 @@ import com.spotkofi.app.ui.theme.ErrorRed
 import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
-/** Downward fling speed, in px/s, that dismisses regardless of distance dragged. */
-private const val DISMISS_VELOCITY = 1200f
+private const val HORIZONTAL_SWIPE_DISTANCE_PX = 96f
 
 @Composable
 fun NowPlayingScreen(
@@ -123,7 +122,11 @@ fun NowPlayingScreen(
 ) {
     val container = LocalAppContainer.current
     val viewModel: NowPlayingViewModel = viewModel {
-        NowPlayingViewModel(container.musicRepository, container.playerController)
+        NowPlayingViewModel(
+            container.musicRepository,
+            container.playerController,
+            container.settingsStore,
+        )
     }
     val state by viewModel.playbackState.collectAsStateWithLifecycle()
     val details by viewModel.details.collectAsStateWithLifecycle()
@@ -137,7 +140,7 @@ fun NowPlayingScreen(
         state = state,
         details = details,
         queue = queue,
-        onQueueRemove = container.queueController::removeFromQueue,
+        onQueueRemove = container.queueController::removeFromQueueAt,
         onQueueMove = container.queueController::moveInQueue,
         onQueueClear = container.queueController::clearQueue,
         onCollapse = onCollapse,
@@ -149,9 +152,14 @@ fun NowPlayingScreen(
         onNext = viewModel::onNext,
         onPrevious = viewModel::onPrevious,
         onSeek = viewModel::onSeek,
+        onSeekTo = viewModel::onSeekTo,
         onToggleShuffle = viewModel::onToggleShuffle,
         onCycleRepeat = viewModel::onCycleRepeat,
         onToggleSaved = viewModel::onToggleSaved,
+        onStop = {
+            container.playerController.stop()
+            onCollapse()
+        },
         onDownload = container.downloadManager::toggleDownload,
         downloadStatus = download?.status,
         downloadProgress = download?.progress ?: 0,
@@ -164,7 +172,7 @@ private fun NowPlayingContent(
     state: PlaybackState,
     details: TrackDetails?,
     queue: List<Track>,
-    onQueueRemove: (String) -> Unit,
+    onQueueRemove: (Int) -> Unit,
     onQueueMove: (Int, Int) -> Unit,
     onQueueClear: () -> Unit,
     onCollapse: () -> Unit,
@@ -176,9 +184,11 @@ private fun NowPlayingContent(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onSeek: (Float) -> Unit,
+    onSeekTo: (Long) -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onToggleSaved: () -> Unit,
+    onStop: () -> Unit,
     onDownload: (Track) -> Unit,
     downloadStatus: com.spotkofi.app.data.service.DownloadManagerStatus?,
     downloadProgress: Int,
@@ -262,13 +272,13 @@ private fun NowPlayingContent(
                 Column {
                     HeroArtwork(
                         track = track,
-                        contextLabel = listOfNotNull(
-                            details?.contextLabel?.takeIf { it.isNotBlank() },
-                            details?.artistGenre?.takeIf { it.isNotBlank() },
-                        ).joinToString(" · "),
+                        contextLabel = "Now Playing",
                         onCollapse = onCollapse,
                         onDrag = onDrag,
                         onDragStopped = onDragStopped,
+                        onSwipeHorizontal = { delta ->
+                            if (delta < 0f) onNext() else onPrevious()
+                        },
                         onMoreOptions = { showOptions = true },
                     )
                 }
@@ -330,6 +340,7 @@ private fun NowPlayingContent(
                             LyricsCard(
                                 lyrics = lyrics,
                                 positionMs = state.positionMs,
+                                tint = seed,
                                 onExpand = { showLyrics = true },
                             )
                         }
@@ -406,6 +417,7 @@ private fun NowPlayingContent(
             CollapsedBar(
                 track = track,
                 isPlaying = state.isPlaying,
+                isLoading = state.isLoading,
                 isSaved = state.isSaved,
                 onTogglePlayPause = onTogglePlayPause,
                 onToggleSaved = onToggleSaved,
@@ -428,6 +440,13 @@ private fun NowPlayingContent(
             onOpenAlbum = onCollectionClick,
             onOpenArtist = onCollectionClick,
             onShare = shareTrack,
+            onOpenLyrics = if (details?.lyrics?.let { it.hasText || it.instrumental } == true) {
+                { showLyrics = true }
+            } else {
+                null
+            },
+            onOpenDetails = { showCredits = true },
+            onStop = onStop,
             onDownload = onDownload,
             downloadStatus = downloadStatus,
             downloadProgress = downloadProgress,
@@ -447,14 +466,7 @@ private fun NowPlayingContent(
             lyrics = details?.lyrics,
             positionMs = state.positionMs,
             onDismiss = { showLyrics = false },
-            onSeekTo = { targetMs ->
-                // The transport speaks in fractions, so a lyric timestamp is
-                // converted here rather than widening the player's own contract.
-                val duration = state.effectiveDurationMs
-                if (duration > 0L) {
-                    onSeek((targetMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f))
-                }
-            },
+            onSeekTo = onSeekTo,
         )
         QueueSheet(
             visible = showQueue,
@@ -477,28 +489,49 @@ private fun HeroArtwork(
     onCollapse: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
+    onSwipeHorizontal: (Float) -> Unit,
     onMoreOptions: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
 
-    val dragState = rememberDraggableState { delta -> onDrag(delta) }
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            // Artwork is shown while the official YouTube app or browser owns playback.
-            .aspectRatio(0.82f)
-            .draggable(
-                state = dragState,
-                orientation = Orientation.Vertical,
-                onDragStopped = { velocity -> onDragStopped(velocity) },
-            ),
+            .padding(horizontal = dimens.spaceXl, vertical = dimens.spaceSm)
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(24.dp))
+            .pointerInput(Unit) {
+                var horizontal = 0f
+                var vertical = 0f
+                detectDragGestures(
+                    onDragStart = {
+                        horizontal = 0f
+                        vertical = 0f
+                    },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        horizontal += amount.x
+                        vertical += amount.y
+                        if (abs(vertical) >= abs(horizontal)) onDrag(amount.y)
+                    },
+                    onDragEnd = {
+                        if (abs(horizontal) >= abs(vertical) &&
+                            abs(horizontal) >= HORIZONTAL_SWIPE_DISTANCE_PX
+                        ) {
+                            onSwipeHorizontal(horizontal)
+                        } else {
+                            onDragStopped(0f)
+                        }
+                    },
+                    onDragCancel = { onDragStopped(0f) },
+                )
+            },
     ) {
         Artwork(
             id = track.id,
             url = track.artworkUrl,
-            shape = RoundedCornerShape(0.dp),
+            shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -575,11 +608,8 @@ private fun TrackInfoRow(
     onToggleSaved: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Artwork(id = track.id, size = 44.dp, url = track.artworkUrl)
-        Spacer(Modifier.width(dimens.spaceMd))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
@@ -704,7 +734,11 @@ private fun TransportRow(
 
         // White, not green: on the tinted page a green button competes with the
         // accent used by shuffle, repeat and the saved check.
-        WhitePlayButton(isPlaying = state.isPlaying, onClick = onTogglePlayPause)
+        WhitePlayButton(
+            isPlaying = state.isPlaying,
+            isLoading = state.isLoading,
+            onClick = onTogglePlayPause,
+        )
 
         IconButton(onClick = onNext) {
             Icon(
@@ -734,7 +768,11 @@ private fun TransportRow(
 }
 
 @Composable
-private fun WhitePlayButton(isPlaying: Boolean, onClick: () -> Unit) {
+private fun WhitePlayButton(
+    isPlaying: Boolean,
+    isLoading: Boolean,
+    onClick: () -> Unit,
+) {
     val scale by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0.96f,
         animationSpec = tween(160),
@@ -748,14 +786,22 @@ private fun WhitePlayButton(isPlaying: Boolean, onClick: () -> Unit) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-            contentDescription = stringResource(
-                if (isPlaying) R.string.cd_pause else R.string.cd_play,
-            ),
-            tint = Color.Black,
-            modifier = Modifier.size(34.dp),
-        )
+        if (isLoading) {
+            CircularProgressIndicator(
+                color = Color.Black,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(30.dp),
+            )
+        } else {
+            Icon(
+                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = stringResource(
+                    if (isPlaying) R.string.cd_pause else R.string.cd_play,
+                ),
+                tint = Color.Black,
+                modifier = Modifier.size(34.dp),
+            )
+        }
     }
 }
 
@@ -808,7 +854,7 @@ private fun SecondaryRow(
         }
         IconButton(onClick = onMoreOptions) {
             Icon(
-                imageVector = Icons.Filled.Tune,
+                imageVector = Icons.Filled.MoreVert,
                 contentDescription = stringResource(R.string.cd_more_options),
                 tint = colors.textSecondary,
                 modifier = Modifier.size(dimens.iconMd),
@@ -955,6 +1001,7 @@ private fun AlbumRow(
 private fun CollapsedBar(
     track: Track,
     isPlaying: Boolean,
+    isLoading: Boolean,
     isSaved: Boolean,
     onTogglePlayPause: () -> Unit,
     onToggleSaved: () -> Unit,
@@ -994,14 +1041,22 @@ private fun CollapsedBar(
         SavedCheck(isSaved = isSaved, onClick = onToggleSaved)
         Spacer(Modifier.width(dimens.spaceSm))
         IconButton(onClick = onTogglePlayPause) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = stringResource(
-                    if (isPlaying) R.string.cd_pause else R.string.cd_play,
-                ),
-                tint = colors.textPrimary,
-                modifier = Modifier.size(dimens.iconLg),
-            )
+            if (isLoading) {
+                CircularProgressIndicator(
+                    color = colors.textPrimary,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(dimens.iconMd),
+                )
+            } else {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = stringResource(
+                        if (isPlaying) R.string.cd_pause else R.string.cd_play,
+                    ),
+                    tint = colors.textPrimary,
+                    modifier = Modifier.size(dimens.iconLg),
+                )
+            }
         }
     }
 }
@@ -1035,9 +1090,11 @@ private fun NowPlayingPreview() {
             onNext = {},
             onPrevious = {},
             onSeek = {},
+            onSeekTo = {},
             onToggleShuffle = {},
             onCycleRepeat = {},
             onToggleSaved = {},
+            onStop = {},
             onDownload = {},
             downloadStatus = null,
             downloadProgress = 0,

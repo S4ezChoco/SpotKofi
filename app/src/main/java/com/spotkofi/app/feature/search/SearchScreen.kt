@@ -26,9 +26,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -129,7 +127,6 @@ fun SearchScreen(
     onCollectionClick: (String) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
     onOpenProfile: () -> Unit,
-    onExploreClick: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val container = LocalAppContainer.current
@@ -206,7 +203,6 @@ fun SearchScreen(
                 query.trim().length < MinQueryLength ->
                     SearchLanding(
                         onCategoryClick = { query = it.title },
-                        onExploreClick = onExploreClick,
                     )
 
                 error != null && current == null -> Box(
@@ -324,7 +320,7 @@ private fun SearchField(
                 Box(modifier = Modifier.weight(1f)) {
                     if (query.isEmpty()) {
                         Text(
-                            text = "Songs, artists or albums",
+                            text = "Search for artists...",
                             style = MaterialTheme.typography.titleMedium,
                             color = colors.textTertiary,
                             maxLines = 1,
@@ -601,35 +597,77 @@ private fun CollectionResultRow(
 @Composable
 private fun ColumnScope.SearchLanding(
     onCategoryClick: (SearchCategory) -> Unit,
-    onExploreClick: () -> Unit,
 ) {
+    val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
     val browseCategories = LocalAppContainer.current.musicRepository.browseCategories()
+    val browseTiles = browseCategories.mapIndexed { index, category ->
+        SearchCategory(
+            title = category.name,
+            subtitle = "Search the catalog",
+            color = listOf(
+                Color(0xFF5B35D5),
+                Color(0xFF087A61),
+                Color(0xFFE41483),
+                Color(0xFFB85B12),
+            )[index % 4],
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.weight(1f),
         contentPadding = PaddingValues(
             start = dimens.screenGutter,
             end = dimens.screenGutter,
-            top = dimens.spaceLg,
+            top = dimens.spaceXl,
             bottom = dimens.spaceXl,
         ),
         verticalArrangement = Arrangement.spacedBy(dimens.spaceLg),
     ) {
-        // Explore leads the page.
-        //
-        // The categories below only prefill the search box, which is a shortcut for
-        // typing. Explore is the one entry here that opens real provider content -
-        // charts, moods, new releases - so burying it under four coloured tiles
-        // would hide the only thing on this screen that is not a search shortcut.
-        item { ExploreEntryCard(onClick = onExploreClick) }
+        item {
+            Text(
+                text = "Everything you need",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary,
+            )
+        }
+
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(SpotKofiTheme.shapes.tile)
+                    .background(colors.card)
+                    .padding(dimens.spaceLg),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Find your next favorite",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textPrimary,
+                    )
+                    Spacer(Modifier.height(dimens.spaceXs))
+                    Text(
+                        text = "Search artists, albums, songs and playlists from one place.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                    )
+                }
+            }
+        }
+
         item {
             Text(
                 text = "Browse all",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
+                color = colors.textPrimary,
             )
         }
+
         item {
             Column(verticalArrangement = Arrangement.spacedBy(dimens.spaceMd)) {
                 searchCategories.chunked(2).forEach { rowCategories ->
@@ -646,81 +684,35 @@ private fun ColumnScope.SearchLanding(
                 }
             }
         }
-        item {
-            Text(
-                text = "Explore music",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = dimens.spaceXs),
-            )
-        }
-        items(browseCategories) { category ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(SpotKofiTheme.shapes.tile)
-                    .background(SpotKofiTheme.colors.elevated)
-                    .clickable {
-                        onCategoryClick(SearchCategory(category.name, "", Color.Gray))
-                    }
-                    .padding(dimens.spaceLg),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+
+        if (browseTiles.isNotEmpty()) {
+            item {
                 Text(
-                    text = category.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = SpotKofiTheme.colors.textPrimary,
+                    text = "More categories",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary,
                 )
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(dimens.spaceMd)) {
+                    browseTiles.chunked(2).forEach { rowTiles ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd)) {
+                            rowTiles.forEach { category ->
+                                SearchCategoryCard(
+                                    category = category,
+                                    onClick = { onCategoryClick(category) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
             }
         }
 
         item { AppFooter() }
-    }
-}
-
-/** Entry point to charts, moods and moments, genres, new releases and trending. */
-@Composable
-private fun ExploreEntryCard(onClick: () -> Unit) {
-    val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(SpotKofiTheme.shapes.tile)
-            .background(colors.card)
-            .clickable(onClick = onClick)
-            .padding(dimens.spaceLg),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Explore,
-            contentDescription = null,
-            tint = colors.accent,
-            modifier = Modifier.size(dimens.iconLg),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Explore",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = colors.textPrimary,
-            )
-            Text(
-                text = "Charts, moods and moments, genres, new releases",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textSecondary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Icon(
-            imageVector = Icons.Filled.ChevronRight,
-            contentDescription = null,
-            tint = colors.textTertiary,
-            modifier = Modifier.size(dimens.iconMd),
-        )
     }
 }
 

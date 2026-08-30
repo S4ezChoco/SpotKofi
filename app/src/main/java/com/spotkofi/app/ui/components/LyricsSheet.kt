@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -61,15 +62,22 @@ fun LyricsCard(
     positionMs: Long,
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
+    tint: Color? = null,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
+    val cardTint = tint ?: colors.accent
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(SpotKofiTheme.shapes.card)
-            .background(colors.card)
+            .background(
+                Brush.verticalGradient(
+                    0f to cardTint.copy(alpha = 0.44f),
+                    1f to colors.card,
+                ),
+            )
             .clickableScale(pressedScale = 0.99f, onClick = onExpand)
             .padding(vertical = dimens.spaceMd),
     ) {
@@ -97,6 +105,13 @@ fun LyricsCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.textTertiary,
             )
+            Spacer(Modifier.width(dimens.spaceMd))
+            Text(
+                text = "Show",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.accent,
+            )
         }
 
         Spacer(Modifier.height(dimens.spaceSm))
@@ -116,7 +131,7 @@ fun LyricsCard(
         Spacer(Modifier.height(dimens.spaceSm))
 
         Text(
-            text = "Tap to open \u00b7 ${AppConstants.LYRICS_PROVIDER_NAME}",
+            text = "Tap to open \u00b7 ${lyrics.providerName ?: AppConstants.LYRICS_PROVIDER_NAME}",
             style = MaterialTheme.typography.labelSmall,
             color = colors.textTertiary,
             modifier = Modifier.padding(horizontal = dimens.spaceLg),
@@ -236,7 +251,7 @@ fun LyricsSheet(
                 Text(
                     // Named because the words are someone else's work fetched at
                     // runtime, not something this app wrote or ships.
-                    text = "Lyrics by ${AppConstants.LYRICS_PROVIDER_NAME}",
+                    text = "Lyrics by ${lyrics.providerName ?: AppConstants.LYRICS_PROVIDER_NAME}",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textTertiary,
                 )

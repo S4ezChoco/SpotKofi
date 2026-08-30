@@ -100,6 +100,40 @@ data class Track(
     val isExternallyOpenable: Boolean get() = !externalUrl.isNullOrBlank()
 }
 
+/**
+ * One of the eight compact tiles pinned to the top of Home.
+ *
+ * A tile can represent a recently played track or a remote collection. Keeping
+ * the target explicit lets the same compact UI play a track immediately instead
+ * of opening an album page just because the tile came from local history.
+ */
+data class HomeQuickPick(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val artworkUrl: String?,
+    val track: Track? = null,
+    val collectionId: String? = null,
+) {
+    companion object {
+        fun fromTrack(track: Track): HomeQuickPick = HomeQuickPick(
+            id = "track:${track.id}",
+            title = track.title,
+            subtitle = track.artistName,
+            artworkUrl = track.artworkUrl,
+            track = track,
+        )
+
+        fun fromCollection(collection: MediaCollection): HomeQuickPick = HomeQuickPick(
+            id = "collection:${collection.id}",
+            title = collection.title,
+            subtitle = collection.subtitle,
+            artworkUrl = collection.artworkUrl,
+            collectionId = collection.id,
+        )
+    }
+}
+
 /** A titled, horizontally scrolling row on the Home screen. */
 data class Shelf(
     val id: String,
@@ -307,6 +341,8 @@ data class TrackLyrics(
     val plain: String? = null,
     val synced: String? = null,
     val instrumental: Boolean = false,
+    /** Name of the selected runtime provider, for transparent attribution. */
+    val providerName: String? = null,
 ) {
     val hasText: Boolean get() = !plain.isNullOrBlank() || !synced.isNullOrBlank()
 }
@@ -382,6 +418,16 @@ data class SearchResults(
 
 enum class RepeatMode { Off, All, One }
 
+/** Explicit transport state so resolving and buffering never look like a paused song. */
+enum class PlaybackStatus {
+    Idle,
+    Resolving,
+    Buffering,
+    Playing,
+    Paused,
+    Error,
+}
+
 /**
  * Everything the player UI needs to render.
  *
@@ -391,6 +437,7 @@ enum class RepeatMode { Off, All, One }
  */
 data class PlaybackState(
     val track: Track? = null,
+    val status: PlaybackStatus = PlaybackStatus.Idle,
     val isPlaying: Boolean = false,
     val positionMs: Long = 0L,
     val isShuffled: Boolean = false,
@@ -424,6 +471,10 @@ data class PlaybackState(
     val playRequestId: Long = 0L,
 ) {
     val hasTrack: Boolean get() = track != null
+
+    /** True while the app is resolving a track or Media3 is buffering it. */
+    val isLoading: Boolean
+        get() = status == PlaybackStatus.Resolving || status == PlaybackStatus.Buffering
 
     /** The duration the scrubber and timestamps should use. */
     val effectiveDurationMs: Long

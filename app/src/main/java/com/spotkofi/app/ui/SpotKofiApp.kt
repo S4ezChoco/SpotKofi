@@ -62,9 +62,7 @@ import com.spotkofi.app.feature.player.NowPlayingScreen
 import com.spotkofi.app.feature.profile.ProfileDrawer
 import com.spotkofi.app.feature.search.SearchScreen
 import com.spotkofi.app.feature.settings.SettingsScreen
-import com.spotkofi.app.ui.components.CreateOption
 import com.spotkofi.app.ui.components.CreatePlaylistDialog
-import com.spotkofi.app.ui.components.CreateSheet
 import com.spotkofi.app.ui.components.MiniPlayer
 import com.spotkofi.app.ui.components.SpotKofiDrawer
 import com.spotkofi.app.ui.components.rememberSpotKofiDrawerState
@@ -88,10 +86,10 @@ import kotlinx.coroutines.launch
 private val MaxBackdropBlur = 20.dp
 
 /** Fraction of the screen the player must be dragged past to dismiss on release. */
-private const val DISMISS_FRACTION = 0.2f
+private const val MINIMIZE_FRACTION = 0.2f
 
-/** Downward fling speed, px/s, that dismisses regardless of distance dragged. */
-private const val DISMISS_VELOCITY_PX = 1100f
+/** Downward fling speed, px/s, that minimizes regardless of distance dragged. */
+private const val MINIMIZE_VELOCITY_PX = 1100f
 
 /**
  * Root of the composable tree: provides the dependency container and theme, owns
@@ -125,7 +123,6 @@ fun SpotKofiApp(
             val playbackState by container.playerController.state.collectAsStateWithLifecycle()
             val settings by container.settingsStore.settings.collectAsStateWithLifecycle()
 
-            var showCreateSheet by remember { mutableStateOf(false) }
             var showPlaylistDialog by remember { mutableStateOf(false) }
 
             // ---------------- Player position: one value, one owner ----------------
@@ -149,9 +146,11 @@ fun SpotKofiApp(
             var playerMounted by remember { mutableStateOf(false) }
 
             val scope = rememberCoroutineScope()
+            val settleJob = remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
             fun settlePlayer(open: Boolean, velocityPxPerSec: Float = 0f) {
-                scope.launch {
+                settleJob.value?.cancel()
+                settleJob.value = scope.launch {
                     animate(
                         initialValue = playerPos.floatValue,
                         targetValue = if (open) 0f else 1f,
@@ -163,24 +162,8 @@ fun SpotKofiApp(
                 }
             }
 
-            /**
-             * Closing the player, and stopping the audio if the user asked for that.
-             *
-             * Dismissing is the only gesture that means "I am done with this
-             * song": collapsing with the chevron, pressing back and opening an
-             * album from the player all keep audio running and go through
-             * [settlePlayer] instead.
-             *
-             * Whether it also stops the audio is a preference, because both readings
-             * are reasonable: some people swipe the window away to get it out of the
-             * way, others to end the song.
-             */
-            fun closePlayer() {
-                if (settings.stopOnPlayerDismiss) container.playerController.stop()
-                settlePlayer(open = false)
-            }
-
             fun openPlayer() {
+                settleJob.value?.cancel()
                 // Make the video surface visible immediately. The old path only
                 // started an animation from the dismissed position; in practice
                 // the WebView could keep playing behind the mini-player while the
@@ -234,7 +217,6 @@ fun SpotKofiApp(
                 TopLevelDestination.Home -> destination?.hasRoute(HomeRoute::class) == true
                 TopLevelDestination.Search -> destination?.hasRoute(SearchRoute::class) == true
                 TopLevelDestination.Library -> destination?.hasRoute(LibraryRoute::class) == true
-                TopLevelDestination.Create -> false
             }
 
             val userName = remember { container.musicRepository.currentUserName() }
@@ -244,7 +226,7 @@ fun SpotKofiApp(
             val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             val statusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-            val barBlock = dimens.floatingBarHeight + dimens.floatingBarGap
+            val barBlock = dimens.floatingBarHeight
             val miniBlock = if (playbackState.hasTrack) {
                 dimens.miniPlayerHeight + dimens.spaceMd
             } else {
@@ -375,9 +357,6 @@ fun SpotKofiApp(
                                             container.playerController.play(track, queue)
                                         },
                                         onOpenProfile = drawerState::open,
-                                        onExploreClick = {
-                                            navController.navigate(ExploreRoute)
-                                        },
                                         contentPadding = screenPadding,
                                     )
                                 }
@@ -401,7 +380,7 @@ fun SpotKofiApp(
                                         onSearchClick = {
                                             navController.switchTab(TopLevelDestination.Search)
                                         },
-                                        onCreate = { showCreateSheet = true },
+                                        onCreate = { showPlaylistDialog = true },
                                         contentPadding = screenPadding,
                                     )
                                 }
@@ -457,26 +436,12 @@ fun SpotKofiApp(
                                     onClick = ::openPlayer,
                                     onTogglePlayPause = container.playerController::togglePlayPause,
                                     onToggleSaved = container.playerController::toggleSaved,
-                                    // Swiping the collapsed card down closes the
-                                    // player, and closing the player stops the
-                                    // audio. A card that vanishes while the song
-                                    // keeps going would leave no way back to it.
-                                    onClose = ::closePlayer,
+                                    onNext = container.playerController::next,
+                                    onPrevious = container.playerController::previous,
+                                    onDismiss = container.playerController::stop,
                                 )
                             }
                         }
-
-                        // ---- Create panel and its scrim ----
-                        CreateSheet(
-                            visible = showCreateSheet,
-                            onDismiss = { showCreateSheet = false },
-                            onOptionClick = { option ->
-                                showCreateSheet = false
-                                if (option == CreateOption.Playlist) {
-                                    showPlaylistDialog = true
-                                }
-                            },
-                        )
 
                         CreatePlaylistDialog(
                             visible = showPlaylistDialog,
@@ -489,10 +454,8 @@ fun SpotKofiApp(
                             },
                         )
 
-                        // ---- Floating nav bar, on top of the Create scrim ----
-                        // Above the scrim so the Create button stays lit and
-                        // tappable while its panel is open. That is what makes the
-                        // panel read as belonging to the button.
+                        // ---- Bottom navigation, docked to the system inset ----
+                        // The bar stays visible above the system navigation inset.
                         AnimatedVisibility(
                             visible = !isSettings,
                             enter = slideInVertically(Motion.gentle()) { it * 2 } +
@@ -503,32 +466,24 @@ fun SpotKofiApp(
                         ) {
                             SpotKofiBottomBar(
                                 current = activeTab,
-                                createExpanded = showCreateSheet,
                                 onSelect = { tapped ->
-                                    if (tapped.isAction) {
-                                        // Same button opens and closes, matching the
-                                        // plus-to-cross rotation.
-                                        showCreateSheet = !showCreateSheet
-                                    } else {
-                                        showCreateSheet = false
-                                        when {
-                                            // Already standing on that tab's own
-                                            // screen: do nothing. Navigating would
-                                            // pop and re-push it, destroying and
-                                            // rebuilding the screen, which is the
-                                            // reload being seen.
-                                            isOnTabRoot(tapped) -> Unit
+                                    when {
+                                        // Already standing on that tab's own
+                                        // screen: do nothing. Navigating would
+                                        // pop and re-push it, destroying and
+                                        // rebuilding the screen, which is the
+                                        // reload being seen.
+                                        isOnTabRoot(tapped) -> Unit
 
-                                            // Deep inside the tab that is already
-                                            // active: the tap means "take me back to
-                                            // the top of this tab". Handled as an
-                                            // explicit pop so it cannot depend on
-                                            // saved-state restoration.
-                                            tapped == activeTab ->
-                                                navController.popToTabRoot(tapped)
+                                        // Deep inside the tab that is already
+                                        // active: the tap means "take me back to
+                                        // the top of this tab". Handled as an
+                                        // explicit pop so it cannot depend on
+                                        // saved-state restoration.
+                                        tapped == activeTab ->
+                                            navController.popToTabRoot(tapped)
 
-                                            else -> navController.switchTab(tapped)
-                                        }
+                                        else -> navController.switchTab(tapped)
                                     }
                                 },
                             )
@@ -580,14 +535,11 @@ fun SpotKofiApp(
                                             .coerceIn(0f, 1f)
                                 },
                                 onDragStopped = { velocity ->
-                                    val dismiss = playerPos.floatValue > DISMISS_FRACTION ||
-                                        velocity > DISMISS_VELOCITY_PX
-                                    if (dismiss && settings.stopOnPlayerDismiss) {
-                                        // Swiping the page away closes the song, not
-                                        // just the window - unless the user turned
-                                        // that off in Settings.
-                                        container.playerController.stop()
-                                    }
+                                    val dismiss = playerPos.floatValue > MINIMIZE_FRACTION ||
+                                        velocity > MINIMIZE_VELOCITY_PX
+                                    // A downward swipe only minimizes the window. Playback
+                                    // remains available through the mini player; stopping
+                                    // is an explicit action in the full-player menu.
                                     settlePlayer(open = !dismiss, velocityPxPerSec = velocity)
                                 },
                             )
@@ -616,8 +568,6 @@ private fun NavHostController.switchTab(destination: TopLevelDestination) {
         TopLevelDestination.Home -> HomeGraph
         TopLevelDestination.Search -> SearchGraph
         TopLevelDestination.Library -> LibraryGraph
-        // Create never routes; the caller intercepts it before reaching here.
-        TopLevelDestination.Create -> return
     }
     navigate(graphRoute) {
         popUpTo(graph.findStartDestination().id) {
@@ -641,7 +591,6 @@ private fun NavHostController.popToTabRoot(destination: TopLevelDestination) {
         TopLevelDestination.Home -> popBackStack(HomeRoute, inclusive = false)
         TopLevelDestination.Search -> popBackStack(SearchRoute, inclusive = false)
         TopLevelDestination.Library -> popBackStack(LibraryRoute, inclusive = false)
-        TopLevelDestination.Create -> Unit
     }
 }
 

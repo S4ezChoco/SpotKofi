@@ -3,9 +3,7 @@ package com.spotkofi.app.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +35,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,15 +45,13 @@ import com.spotkofi.app.R
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.ui.theme.SpotKofiTheme
-
-/** Downward fling speed, px/s, that closes the player outright. */
-private const val CLOSE_VELOCITY_PX = 700f
-
-/** Drag distance, px, past which a release closes the player. */
-private const val CLOSE_DISTANCE_PX = 48f
+import kotlin.math.abs
 
 /** Upward drag distance, px, that expands into the full player. */
 private const val EXPAND_DISTANCE_PX = 36f
+private const val EXPAND_VELOCITY_PX = 700f
+private const val HORIZONTAL_SWIPE_DISTANCE_PX = 96f
+private const val DISMISS_DISTANCE_PX = 120f
 
 /**
  * Collapsed player docked above the bottom navigation.
@@ -63,8 +61,8 @@ private const val EXPAND_DISTANCE_PX = 36f
  * "attached" to the track instead of as part of the chrome.
  *
  * It is a gesture surface, not just a button: dragging up expands the full
- * player, dragging down closes playback entirely. That mirrors the full player,
- * where the same downward gesture dismisses.
+ * player. A downward drag settles back in place and never stops playback; stopping
+ * is an explicit action in the full-player options.
  *
  * Renders nothing when no track is loaded, so callers can place it
  * unconditionally without a wrapping `if`.
@@ -75,7 +73,10 @@ fun MiniPlayer(
     onClick: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onToggleSaved: () -> Unit,
-    onClose: () -> Unit,
+    onNext: () -> Unit = {},
+    onPrevious: () -> Unit = {},
+    /** A deliberate downward swipe on the already-minimized player dismisses it. */
+    onDismiss: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val track = state.track ?: return
@@ -101,36 +102,50 @@ fun MiniPlayer(
         label = "miniPlayerProgress",
     )
 
-    // Drag offset is kept out of composition and read only in the draw phase, so
-    // following the finger does not recompose the card on every frame.
+    // One gesture surface handles all three directions without making a vertical
+    // drag look like a row click: up opens, down dismisses, left/right changes track.
     val dragPx = remember { mutableFloatStateOf(0f) }
-    val dragState = rememberDraggableState { delta ->
-        dragPx.floatValue = (dragPx.floatValue + delta).coerceIn(-EXPAND_DISTANCE_PX * 2f, 240f)
-    }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = dimens.spaceSm)
             .graphicsLayer {
-                // Only the downward half is followed. Dragging up should feel like
-                // a trigger for the full player, not like lifting the card.
                 translationY = dragPx.floatValue.coerceAtLeast(0f) * 0.6f
             }
             .clip(SpotKofiTheme.shapes.miniPlayer)
             .background(cardBrush)
-            .draggable(
-                state = dragState,
-                orientation = Orientation.Vertical,
-                onDragStopped = { velocity ->
-                    val offset = dragPx.floatValue
-                    dragPx.floatValue = 0f
-                    when {
-                        offset > CLOSE_DISTANCE_PX || velocity > CLOSE_VELOCITY_PX -> onClose()
-                        offset < -EXPAND_DISTANCE_PX || velocity < -CLOSE_VELOCITY_PX -> onClick()
-                    }
-                },
-            )
+            .pointerInput(Unit) {
+                var horizontal = 0f
+                var vertical = 0f
+                detectDragGestures(
+                    onDragStart = {
+                        horizontal = 0f
+                        vertical = 0f
+                        dragPx.floatValue = 0f
+                    },
+                    onDragCancel = { dragPx.floatValue = 0f },
+                    onDragEnd = {
+                        val endedHorizontal = horizontal
+                        val endedVertical = vertical
+                        dragPx.floatValue = 0f
+                        when {
+                            abs(endedHorizontal) >= HORIZONTAL_SWIPE_DISTANCE_PX -> {
+                                if (endedHorizontal < 0f) onNext() else onPrevious()
+                            }
+
+                            endedVertical <= -EXPAND_DISTANCE_PX -> onClick()
+                            endedVertical >= DISMISS_DISTANCE_PX -> onDismiss()
+                        }
+                    },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        horizontal += amount.x
+                        vertical += amount.y
+                        dragPx.floatValue = vertical.coerceIn(-EXPAND_DISTANCE_PX * 2f, 240f)
+                    },
+                )
+            }
             .clickable(onClick = onClick),
     ) {
         Row(
@@ -202,18 +217,26 @@ fun MiniPlayer(
             )
 
             IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(44.dp)) {
-                Icon(
-                    imageVector = if (state.isPlaying) {
-                        Icons.Filled.Pause
-                    } else {
-                        Icons.Filled.PlayArrow
-                    },
-                    contentDescription = stringResource(
-                        if (state.isPlaying) R.string.cd_pause else R.string.cd_play,
-                    ),
-                    tint = colors.textPrimary,
-                    modifier = Modifier.size(dimens.iconLg),
-                )
+                if (state.isLoading) {
+                    CircularProgressIndicator(
+                        color = colors.textPrimary,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(dimens.iconMd),
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (state.isPlaying) {
+                            Icons.Filled.Pause
+                        } else {
+                            Icons.Filled.PlayArrow
+                        },
+                        contentDescription = stringResource(
+                            if (state.isPlaying) R.string.cd_pause else R.string.cd_play,
+                        ),
+                        tint = colors.textPrimary,
+                        modifier = Modifier.size(dimens.iconLg),
+                    )
+                }
             }
         }
 
@@ -260,7 +283,6 @@ private fun MiniPlayerPreview() {
                 onClick = {},
                 onTogglePlayPause = {},
                 onToggleSaved = {},
-                onClose = {},
             )
             MiniPlayer(
                 state = PlaybackState(
@@ -277,7 +299,6 @@ private fun MiniPlayerPreview() {
                 onClick = {},
                 onTogglePlayPause = {},
                 onToggleSaved = {},
-                onClose = {},
             )
         }
     }

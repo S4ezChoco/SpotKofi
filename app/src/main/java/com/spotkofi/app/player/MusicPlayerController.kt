@@ -10,6 +10,7 @@ import androidx.media3.datasource.DataSource
 import com.spotkofi.app.data.local.AppSettings
 import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.PlaybackState
+import com.spotkofi.app.data.model.PlaybackStatus
 import com.spotkofi.app.data.model.RepeatMode
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.remote.YouTubeTrackResolver
@@ -122,6 +123,9 @@ class MusicPlayerController(
     /** Short-lived in-memory cache; resolved YouTube URLs are not metadata IDs. */
     private val streamUrlCache = linkedMapOf<String, String>()
 
+    /** Serialized queue writes keep rapid reorder/remove actions in their visible order. */
+    private var queueWriteJob: Job? = null
+
     private val _state = MutableStateFlow(PlaybackState())
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
 
@@ -148,13 +152,18 @@ class MusicPlayerController(
     }
 
     init {
-        audioPlayer.setOnPlaybackStateChanged { isPlaying ->
+        audioPlayer.setOnPlaybackStateChanged { status ->
             if (!released) {
-                _state.update { it.copy(isPlaying = isPlaying) }
+                _state.update { current ->
+                    current.copy(
+                        status = status,
+                        isPlaying = status == PlaybackStatus.Playing,
+                    )
+                }
                 // Started only once audio is genuinely playing. Starting it at
                 // resolve time would leave a foreground service with nothing to
                 // show while the stream URL is still being fetched.
-                if (isPlaying) ensurePlaybackService()
+                if (status == PlaybackStatus.Playing) ensurePlaybackService()
             }
         }
 
@@ -189,7 +198,7 @@ class MusicPlayerController(
             if (!released) {
                 currentVideoId?.let(streamUrlCache::remove)
                 playbackIntent = false
-                _state.update { it.copy(isPlaying = false, error = error) }
+                _state.update { it.copy(isPlaying = false, status = PlaybackStatus.Error, error = error) }
             }
         }
 
@@ -203,7 +212,7 @@ class MusicPlayerController(
             if (released) return@launch
             restoreJob.join()
 
-            val requestedQueue = queue.ifEmpty { listOf(track) }
+            val requestedQueue = queue.ifEmpty { listOf(track) }.distinctBy { it.id }
             val normalizedQueue = if (requestedQueue.any { it.id == track.id }) {
                 requestedQueue
             } else {
@@ -245,19 +254,30 @@ class MusicPlayerController(
         coroutineScope.launch {
             if (released) return@launch
             restoreJob.join()
-            val current = _queue.value
-            val removedIndex = current.indexOfFirst { it.id == trackId }
-            if (removedIndex < 0) return@launch
-            val next = current.toMutableList().apply { removeAt(removedIndex) }
-            if (removedIndex < currentTrackIndex) currentTrackIndex--
-            _queue.value = next
-            if (next.isEmpty()) {
-                stopInternal()
-            } else {
-                currentTrackIndex = currentTrackIndex.coerceIn(0, next.lastIndex)
-            }
-            persistQueue()
+            removeQueueEntry(_queue.value.indexOfFirst { it.id == trackId })
         }
+    }
+
+    override fun removeFromQueueAt(index: Int) {
+        coroutineScope.launch {
+            if (released) return@launch
+            restoreJob.join()
+            removeQueueEntry(index)
+        }
+    }
+
+    private fun removeQueueEntry(index: Int) {
+        val current = _queue.value
+        if (index !in current.indices) return
+        val next = current.toMutableList().apply { removeAt(index) }
+        if (index < currentTrackIndex) currentTrackIndex--
+        _queue.value = next
+        if (next.isEmpty()) {
+            stopInternal()
+        } else {
+            currentTrackIndex = currentTrackIndex.coerceIn(0, next.lastIndex)
+        }
+        persistQueue()
     }
 
     override fun moveInQueue(from: Int, to: Int) {
@@ -298,7 +318,7 @@ class MusicPlayerController(
             if (playbackIntent) {
                 playbackIntent = false
                 audioPlayer.pause()
-                _state.update { it.copy(isPlaying = false) }
+                _state.update { it.copy(isPlaying = false, status = PlaybackStatus.Paused) }
             } else {
                 playbackIntent = true
                 when {
@@ -368,6 +388,12 @@ class MusicPlayerController(
         }
     }
 
+    override fun seekTo(positionMs: Long) {
+        coroutineScope.launch {
+            if (!released) audioPlayer.seekTo(positionMs)
+        }
+    }
+
     override fun toggleShuffle() {
         coroutineScope.launch {
             if (released) return@launch
@@ -430,6 +456,8 @@ class MusicPlayerController(
         released = true
         playbackGeneration++
         activePlaybackJob?.cancel()
+        queueWriteJob?.cancel()
+        queueWriteJob = null
         activePlaybackJob = null
         playbackIntent = false
         currentVideoId = null
@@ -448,6 +476,7 @@ class MusicPlayerController(
         _state.update {
             it.copy(
                 track = track,
+                status = PlaybackStatus.Resolving,
                 isPlaying = false,
                 positionMs = 0L,
                 error = null,
@@ -470,6 +499,7 @@ class MusicPlayerController(
                     _state.update {
                         it.copy(
                             isPlaying = false,
+                            status = PlaybackStatus.Error,
                             error = "Unable to resolve audio: ${error.message.orEmpty()}",
                         )
                     }
@@ -484,6 +514,7 @@ class MusicPlayerController(
                 _state.update {
                     it.copy(
                         isPlaying = false,
+                        status = PlaybackStatus.Error,
                         error = "No full-length stream was found for this track",
                     )
                 }
@@ -579,7 +610,7 @@ class MusicPlayerController(
                     requestPlayback(currentQueue[currentTrackIndex])
                 } else {
                     playbackIntent = false
-                    _state.update { it.copy(isPlaying = false) }
+                    _state.update { it.copy(isPlaying = false, status = PlaybackStatus.Paused) }
                 }
             }
         }
@@ -598,6 +629,7 @@ class MusicPlayerController(
         _state.update {
             it.copy(
                 track = null,
+                status = PlaybackStatus.Idle,
                 isPlaying = false,
                 positionMs = 0L,
                 streamDurationMs = null,
@@ -607,8 +639,11 @@ class MusicPlayerController(
     }
 
     private fun persistQueue() {
-        coroutineScope.launch {
-            if (!released) localStore.saveQueue(_queue.value)
+        val snapshot = _queue.value
+        val previous = queueWriteJob
+        queueWriteJob = coroutineScope.launch {
+            previous?.join()
+            if (!released) localStore.saveQueue(snapshot)
         }
     }
 

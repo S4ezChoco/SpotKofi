@@ -53,9 +53,6 @@ data class SpotKofiDimens(
     /** Inset from the left and right screen edges. */
     val floatingBarMargin: Dp = 14.dp,
 
-    /** Gap between the bar and the navigation-bar inset below it. */
-    val floatingBarGap: Dp = 10.dp,
-
     /** Corner radius. Large enough to read as a pill at [floatingBarHeight]. */
     val floatingBarRadius: Dp = 26.dp,
 

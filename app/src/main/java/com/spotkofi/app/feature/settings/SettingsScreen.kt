@@ -40,11 +40,11 @@ import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -69,6 +69,7 @@ import com.spotkofi.app.R
 import com.spotkofi.app.core.AppConstants
 import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.data.model.ChartRegion
+import com.spotkofi.app.data.local.LyricsProvider
 import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
 import com.spotkofi.app.ui.motion.clickableScale
@@ -105,6 +106,7 @@ fun SettingsScreen(
     val history by container.localStore.history.collectAsStateWithLifecycle()
 
     var showRegionPicker by remember { mutableStateOf(false) }
+    var showLyricsProviderPicker by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<ConfirmAction?>(null) }
 
     // Cache size is read on demand rather than observed: the value only moves while
@@ -188,14 +190,6 @@ fun SettingsScreen(
                     checked = settings.openPlayerOnPlay,
                     onCheckedChange = container.settingsStore::setOpenPlayerOnPlay,
                 )
-                RowDivider()
-                ToggleRow(
-                    icon = Icons.Filled.Stop,
-                    title = "Swipe down stops playback",
-                    subtitle = "Dismissing the player also stops the audio",
-                    checked = settings.stopOnPlayerDismiss,
-                    onCheckedChange = container.settingsStore::setStopOnPlayerDismiss,
-                )
             }
 
             settingsGroup(
@@ -233,11 +227,12 @@ fun SettingsScreen(
                     onCheckedChange = container.settingsStore::setLyricsEnabled,
                 )
                 RowDivider()
-                InfoRow(
+                ActionRow(
                     icon = Icons.Filled.Info,
                     title = "Lyrics provider",
-                    subtitle = AppConstants.LYRICS_PROVIDER_NAME,
-                    onClick = { context.openLink(AppConstants.LYRICS_PROVIDER_URL) },
+                    subtitle = settings.lyricsProvider.description,
+                    trailingText = settings.lyricsProvider.displayName,
+                    onClick = { showLyricsProviderPicker = true },
                 )
             }
 
@@ -342,6 +337,17 @@ fun SettingsScreen(
                 showRegionPicker = false
             },
             onDismiss = { showRegionPicker = false },
+        )
+    }
+
+    if (showLyricsProviderPicker) {
+        LyricsProviderDialog(
+            selectedProvider = settings.lyricsProvider,
+            onSelect = { provider ->
+                container.settingsStore.setLyricsProvider(provider)
+                showLyricsProviderPicker = false
+            },
+            onDismiss = { showLyricsProviderPicker = false },
         )
     }
 
@@ -582,6 +588,62 @@ private fun InfoRow(
             RowText(title, subtitle, enabled = true)
         }
     }
+}
+
+// ------------------------------------------------------------ lyrics picker
+
+@Composable
+private fun LyricsProviderDialog(
+    selectedProvider: LyricsProvider,
+    onSelect: (LyricsProvider) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = colors.highlight,
+        titleContentColor = colors.textPrimary,
+        title = { Text("Lyrics provider") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(dimens.spaceXxs)) {
+                LyricsProvider.entries.forEach { provider ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(SpotKofiTheme.shapes.chip)
+                            .clickableScale(pressedScale = 0.98f) { onSelect(provider) }
+                            .padding(horizontal = dimens.spaceSm, vertical = dimens.spaceXs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = provider == selectedProvider,
+                            onClick = null,
+                        )
+                        Spacer(Modifier.width(dimens.spaceSm))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = provider.displayName,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = colors.textPrimary,
+                            )
+                            Text(
+                                text = provider.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textSecondary,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = colors.accent)
+            }
+        },
+    )
 }
 
 // ---------------------------------------------------------------- region picker

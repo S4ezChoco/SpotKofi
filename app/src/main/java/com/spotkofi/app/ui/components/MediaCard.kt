@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
+import com.spotkofi.app.data.model.HomeQuickPick
 import com.spotkofi.app.data.model.MediaCollection
 import com.spotkofi.app.data.model.Playlist
 import com.spotkofi.app.ui.motion.clickableScale
@@ -137,6 +138,55 @@ fun QuickPickCard(
                 .weight(1f)
                 .padding(end = dimens.spaceSm),
         )
+    }
+}
+
+
+/** Compact Home tile for either a recently played track or a remote collection. */
+@Composable
+fun QuickPickCard(
+    item: HomeQuickPick,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+
+    Row(
+        modifier = modifier
+            .height(dimens.artworkSmall)
+            .clip(SpotKofiTheme.shapes.quickPick)
+            .background(colors.card)
+            .clickableScale(pressedScale = 0.97f, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Artwork(
+            id = item.id,
+            size = dimens.artworkSmall,
+            url = item.artworkUrl,
+            shape = androidx.compose.ui.graphics.RectangleShape,
+        )
+        Spacer(Modifier.width(dimens.spaceMd))
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = dimens.spaceSm),
+        ) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = item.subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

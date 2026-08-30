@@ -57,6 +57,7 @@ fun TrackCreditsSheet(
     credits: TrackCredits?,
     genre: String?,
     onDismiss: () -> Unit,
+    lyricsProviderName: String = AppConstants.LYRICS_PROVIDER_NAME,
     modifier: Modifier = Modifier,
 ) {
     val colors = SpotKofiTheme.colors
@@ -79,9 +80,13 @@ fun TrackCreditsSheet(
             track.durationMs.takeIf { it > 0L }?.let { add("Length" to it.asTrackDuration()) }
             if (track.isExplicit) add("Advisory" to "Explicit")
             credits?.channelName?.let { add("Published by" to it) }
-            credits?.publishedOn?.let { add("Released" to it) }
-            credits?.plays?.let { add("Plays" to it.formatCount()) }
-            add("Source" to "YouTube Music")
+            credits?.publishedOn?.takeIf { it.isNotBlank() }?.let { add("Published" to it) }
+            credits?.plays?.let { add("Views" to it.formatCount()) }
+            when {
+                !track.videoId.isNullOrBlank() -> add("Source" to "YouTube Music")
+                !track.externalUrl.isNullOrBlank() -> add("Source" to "Official provider page")
+            }
+            track.externalUrl?.takeIf { it.isNotBlank() }?.let { add("URL" to it) }
         }
     }
 
@@ -176,7 +181,7 @@ fun TrackCreditsSheet(
                     item {
                         Text(
                             text = "Lyrics, when available, come from " +
-                                "${AppConstants.LYRICS_PROVIDER_NAME}.",
+                                "${lyricsProviderName}.",
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.textTertiary,
                             modifier = Modifier.padding(

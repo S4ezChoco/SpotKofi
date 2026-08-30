@@ -16,6 +16,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.spotkofi.app.data.model.PlaybackStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,7 +46,7 @@ class AudioPlayer(
     private var completionReported = false
     private var currentStreamUrl: String? = null
 
-    private var onPlaybackStateChanged: ((Boolean) -> Unit)? = null
+    private var onPlaybackStateChanged: ((PlaybackStatus) -> Unit)? = null
     private var onPlaybackProgressChanged: ((Long, Long) -> Unit)? = null
     private var onPlaybackError: ((String) -> Unit)? = null
     private var onPlaybackCompleted: (() -> Unit)? = null
@@ -99,7 +100,7 @@ class AudioPlayer(
 
                             Player.STATE_ENDED -> {
                                 progressJob?.cancel()
-                                publishPlaybackState(forcePlaying = false)
+                                publishPlaybackState(forceStatus = PlaybackStatus.Paused)
                                 emitProgress()
                                 if (!completionReported) {
                                     completionReported = true
@@ -122,7 +123,7 @@ class AudioPlayer(
                     override fun onPlayerError(error: PlaybackException) {
                         progressJob?.cancel()
                         player.playWhenReady = false
-                        publishPlaybackState(forcePlaying = false)
+                        publishPlaybackState(forceStatus = PlaybackStatus.Error)
                         val message = "Playback error ${error.errorCodeName}: ${error.message.orEmpty()}"
                         Log.e(TAG, message, error)
                         onPlaybackError?.invoke(message)
@@ -189,7 +190,7 @@ class AudioPlayer(
         if (released) return
         player.playWhenReady = false
         player.pause()
-        publishPlaybackState(forcePlaying = false)
+        publishPlaybackState(forceStatus = PlaybackStatus.Paused)
         emitProgress()
     }
 
@@ -213,7 +214,7 @@ class AudioPlayer(
         player.stop()
         player.clearMediaItems()
         currentStreamUrl = null
-        publishPlaybackState(forcePlaying = false)
+        publishPlaybackState(forceStatus = PlaybackStatus.Idle)
         onPlaybackProgressChanged?.invoke(0L, 0L)
     }
 
@@ -253,7 +254,7 @@ class AudioPlayer(
             (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)
         )
 
-    fun setOnPlaybackStateChanged(callback: (Boolean) -> Unit) {
+    fun setOnPlaybackStateChanged(callback: (PlaybackStatus) -> Unit) {
         onPlaybackStateChanged = callback
     }
 
@@ -282,11 +283,17 @@ class AudioPlayer(
         scope.cancel()
     }
 
-    private fun publishPlaybackState(forcePlaying: Boolean? = null) {
+    private fun publishPlaybackState(forceStatus: PlaybackStatus? = null) {
         if (released) return
-        val playing = forcePlaying ?: isPlaying()
-        onPlaybackStateChanged?.invoke(playing)
-        if (player.playWhenReady && player.playbackState != Player.STATE_ENDED) {
+        val status = forceStatus ?: when {
+            player.playbackState == Player.STATE_BUFFERING -> PlaybackStatus.Buffering
+            player.isPlaying -> PlaybackStatus.Playing
+            player.currentMediaItem != null && player.playbackState == Player.STATE_READY ->
+                PlaybackStatus.Paused
+            else -> PlaybackStatus.Idle
+        }
+        onPlaybackStateChanged?.invoke(status)
+        if (status == PlaybackStatus.Playing || status == PlaybackStatus.Buffering) {
             startProgressUpdates()
         } else {
             progressJob?.cancel()
@@ -319,6 +326,6 @@ class AudioPlayer(
         const val MAX_BUFFER_MS = 60_000
         const val BUFFER_FOR_PLAYBACK_MS = 1_500
         const val BUFFER_FOR_REBUFFER_MS = 5_000
-        const val PROGRESS_INTERVAL_MS = 500L
+        const val PROGRESS_INTERVAL_MS = 250L
     }
 }

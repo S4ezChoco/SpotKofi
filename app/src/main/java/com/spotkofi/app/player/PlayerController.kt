@@ -21,6 +21,7 @@ interface PlayerController {
     fun next()
     fun previous()
     fun seekToFraction(fraction: Float)
+    fun seekTo(positionMs: Long)
     fun toggleShuffle()
     fun cycleRepeatMode()
     fun toggleSaved()
@@ -34,6 +35,8 @@ interface QueueController {
     fun addToQueue(track: Track)
     fun playNext(track: Track)
     fun removeFromQueue(trackId: String)
+    /** Removes exactly one queue entry, so duplicate tracks remain addressable. */
+    fun removeFromQueueAt(index: Int)
     fun moveInQueue(from: Int, to: Int)
     fun clearQueue()
 }

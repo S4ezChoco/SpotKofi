@@ -19,11 +19,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Icon
@@ -41,7 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,6 +81,8 @@ private enum class LibraryFilter(val label: String) {
     Songs("Songs"),
     Albums("Albums"),
     Artists("Artists"),
+    MostPlayed("Most Played"),
+    Followed("Followed"),
     Downloaded("Downloaded"),
 }
 
@@ -113,10 +118,11 @@ fun LibraryScreen(
     val savedCollections by store.savedCollections.collectAsStateWithLifecycle()
     val playlists by store.playlists.collectAsStateWithLifecycle()
     val savedTracks by store.savedTracks.collectAsStateWithLifecycle()
+    val history by store.history.collectAsStateWithLifecycle()
     val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
 
     var filter by remember { mutableStateOf(LibraryFilter.All) }
-    var gridLayout by remember { mutableStateOf(false) }
+    var gridLayout by remember { mutableStateOf(true) }
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
 
     val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
@@ -136,18 +142,23 @@ fun LibraryScreen(
     val allCollections = remember(playlists, savedCollections, visited) {
         (playlists + savedCollections + visited).distinctBy { it.id }
     }
-    val collections = remember(allCollections, filter) {
+    val followedArtists = remember(savedCollections) {
+        savedCollections.filterIsInstance<Artist>()
+    }
+    val collections = remember(allCollections, followedArtists, filter) {
         when (filter) {
             LibraryFilter.All -> allCollections
             LibraryFilter.Playlists -> allCollections.filterIsInstance<Playlist>()
             LibraryFilter.Albums -> allCollections.filterIsInstance<Album>()
             LibraryFilter.Artists -> allCollections.filterIsInstance<Artist>()
-            LibraryFilter.Songs, LibraryFilter.Downloaded -> emptyList()
+            LibraryFilter.Followed -> followedArtists
+            LibraryFilter.Songs, LibraryFilter.MostPlayed, LibraryFilter.Downloaded -> emptyList()
         }
     }
     val tracks = when (filter) {
         LibraryFilter.Downloaded -> downloadedTracks
-        LibraryFilter.Songs -> savedTracks
+        LibraryFilter.All, LibraryFilter.Songs -> savedTracks
+        LibraryFilter.MostPlayed -> history
         else -> emptyList()
     }
 
@@ -183,32 +194,33 @@ fun LibraryScreen(
                         horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
                     ) {
                         LibraryFilter.entries.forEach { option ->
-                            SpotKofiChip(
-                                label = option.label,
-                                selected = option == filter,
-                                onClick = { filter = option },
-                            )
-                        }
+                                SpotKofiChip(
+                                    label = option.label,
+                                    selected = option == filter,
+                                    onClick = { filter = option },
+                                )
+                            }
                     }
                 }
 
-                // Liked songs is its own entry point rather than a chip, because it
-                // is the one list every listener has and the chip row is for
-                // narrowing what is already on screen.
-                if (filter == LibraryFilter.All && savedTracks.isNotEmpty()) {
-                    item(key = "liked_songs") {
-                        LikedSongsRow(
-                            count = savedTracks.size,
-                            onClick = { filter = LibraryFilter.Songs },
-                        )
-                    }
+                item(key = "shortcuts") {
+                    LibraryShortcuts(
+                        favoriteCount = savedTracks.size,
+                        followedCount = followedArtists.size,
+                        mostPlayedCount = history.size,
+                        downloadedCount = downloadedTracks.size,
+                        onFavorite = { filter = LibraryFilter.Songs },
+                        onFollowed = { filter = LibraryFilter.Followed },
+                        onMostPlayed = { filter = LibraryFilter.MostPlayed },
+                        onDownloaded = { filter = LibraryFilter.Downloaded },
+                    )
                 }
 
                 if (showsCollections) {
                     item(key = "collections_heading") {
                         SectionHeading(
                             title = when (filter) {
-                                LibraryFilter.All -> "Playlists, albums and artists"
+                                LibraryFilter.All -> "Recently Added"
                                 else -> filter.label
                             },
                             count = collections.size,
@@ -442,54 +454,83 @@ private fun SectionHeading(
     }
 }
 
-/** The standing entry point to everything the user has saved. */
+private data class LibraryShortcut(
+    val title: String,
+    val count: Int,
+    val icon: ImageVector,
+    val onClick: () -> Unit,
+)
+
 @Composable
-private fun LikedSongsRow(
-    count: Int,
-    onClick: () -> Unit,
+private fun LibraryShortcuts(
+    favoriteCount: Int,
+    followedCount: Int,
+    mostPlayedCount: Int,
+    downloadedCount: Int,
+    onFavorite: () -> Unit,
+    onFollowed: () -> Unit,
+    onMostPlayed: () -> Unit,
+    onDownloaded: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
+    val shortcuts = listOf(
+        LibraryShortcut("Favorite", favoriteCount, Icons.Filled.Favorite, onFavorite),
+        LibraryShortcut("Followed", followedCount, Icons.Filled.Person, onFollowed),
+        LibraryShortcut("Most Played", mostPlayedCount, Icons.Filled.History, onMostPlayed),
+        LibraryShortcut("Downloaded", downloadedCount, Icons.Filled.Download, onDownloaded),
+    )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = dimens.screenGutter, vertical = dimens.spaceSm),
-        verticalAlignment = Alignment.CenterVertically,
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = dimens.screenGutter, vertical = dimens.spaceMd),
+        horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
     ) {
-        Box(
-            modifier = Modifier
-                .size(dimens.artworkRow)
-                .clip(SpotKofiTheme.shapes.artwork)
-                .background(
-                    Brush.linearGradient(
-                        listOf(colors.accent, colors.accentDim),
-                    ),
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Favorite,
-                contentDescription = null,
-                tint = colors.onAccent,
-                modifier = Modifier.size(dimens.iconMd),
+        shortcuts.forEach { shortcut ->
+            LibraryShortcutPill(
+                shortcut = shortcut,
+                colors = colors,
+                dimens = dimens,
             )
         }
-        Spacer(Modifier.width(dimens.spaceMd))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Liked songs",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.textPrimary,
-            )
-            Text(
-                text = if (count == 1) "1 song" else "$count songs",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary,
-            )
-        }
+    }
+}
+
+@Composable
+private fun LibraryShortcutPill(
+    shortcut: LibraryShortcut,
+    colors: com.spotkofi.app.ui.theme.SpotKofiColors,
+    dimens: com.spotkofi.app.ui.theme.SpotKofiDimens,
+) {
+    Row(
+        modifier = Modifier
+            .height(dimens.minTouchTarget)
+            .clip(RoundedCornerShape(50))
+            .background(colors.card)
+            .clickable(onClick = shortcut.onClick)
+            .padding(horizontal = dimens.spaceMd),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.spaceXs),
+    ) {
+        Icon(
+            imageVector = shortcut.icon,
+            contentDescription = null,
+            tint = colors.textSecondary,
+            modifier = Modifier.size(dimens.iconSm),
+        )
+        Text(
+            text = shortcut.title,
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.textPrimary,
+            maxLines = 1,
+        )
+        Text(
+            text = shortcut.count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textTertiary,
+        )
     }
 }
 

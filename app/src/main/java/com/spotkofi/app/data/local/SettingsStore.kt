@@ -6,6 +6,30 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/** Lyrics sources that can be selected without requiring a provider token. */
+enum class LyricsProvider(
+    val key: String,
+    val displayName: String,
+    val description: String,
+) {
+    LrcLib(
+        key = "lrclib",
+        displayName = "LRCLIB",
+        description = "Synced lyrics when the catalog has them",
+    ),
+    LyricsOvh(
+        key = "lyrics_ovh",
+        displayName = "Lyrics.ovh",
+        description = "A second source for plain lyrics",
+    ),
+    ;
+
+    companion object {
+        fun fromKey(value: String?): LyricsProvider =
+            entries.firstOrNull { it.key == value } ?: LrcLib
+    }
+}
+
 /**
  * Every user preference in the app, as one immutable snapshot.
  *
@@ -36,6 +60,8 @@ data class AppSettings(
     // ---- Lyrics ----
     /** Look up lyrics for the playing track. */
     val lyricsEnabled: Boolean = true,
+    /** Provider used for the next track-details request. */
+    val lyricsProvider: LyricsProvider = LyricsProvider.LrcLib,
 
     // ---- Downloads ----
     /** Preferred download ordering when several are queued. */
@@ -75,6 +101,8 @@ class SettingsStore(context: Context) {
 
     fun setLyricsEnabled(value: Boolean) = update { it.copy(lyricsEnabled = value) }
 
+    fun setLyricsProvider(value: LyricsProvider) = update { it.copy(lyricsProvider = value) }
+
     fun setDownloadHighPriority(value: Boolean) = update { it.copy(downloadHighPriority = value) }
 
     /** Restores defaults, for the "reset settings" action. */
@@ -100,9 +128,14 @@ class SettingsStore(context: Context) {
             stopOnPlayerDismiss = prefs.getBoolean(KEY_STOP_ON_DISMISS, defaults.stopOnPlayerDismiss),
             contentRegion = prefs.getString(KEY_REGION, defaults.contentRegion)
                 ?.takeIf { it.isNotBlank() }
+                ?.uppercase()
+                ?.take(2)
                 ?: defaults.contentRegion,
             hideExplicitContent = prefs.getBoolean(KEY_HIDE_EXPLICIT, defaults.hideExplicitContent),
             lyricsEnabled = prefs.getBoolean(KEY_LYRICS, defaults.lyricsEnabled),
+            lyricsProvider = LyricsProvider.fromKey(
+                prefs.getString(KEY_LYRICS_PROVIDER, defaults.lyricsProvider.key),
+            ),
             downloadHighPriority = prefs.getBoolean(
                 KEY_DOWNLOAD_PRIORITY,
                 defaults.downloadHighPriority,
@@ -118,6 +151,7 @@ class SettingsStore(context: Context) {
             .putString(KEY_REGION, value.contentRegion)
             .putBoolean(KEY_HIDE_EXPLICIT, value.hideExplicitContent)
             .putBoolean(KEY_LYRICS, value.lyricsEnabled)
+            .putString(KEY_LYRICS_PROVIDER, value.lyricsProvider.key)
             .putBoolean(KEY_DOWNLOAD_PRIORITY, value.downloadHighPriority)
             .apply()
     }
@@ -130,6 +164,7 @@ class SettingsStore(context: Context) {
         const val KEY_REGION = "content_region"
         const val KEY_HIDE_EXPLICIT = "hide_explicit_content"
         const val KEY_LYRICS = "lyrics_enabled"
+        const val KEY_LYRICS_PROVIDER = "lyrics_provider"
         const val KEY_DOWNLOAD_PRIORITY = "download_high_priority"
     }
 }

@@ -4,11 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.TrackDetails
+import com.spotkofi.app.data.local.SettingsStore
 import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.player.PlayerController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -23,6 +25,7 @@ import kotlinx.coroutines.launch
 class NowPlayingViewModel(
     private val repository: MusicRepository,
     private val player: PlayerController,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
 
     val playbackState = player.state
@@ -32,10 +35,15 @@ class NowPlayingViewModel(
 
     init {
         viewModelScope.launch {
-            // Keyed on track id, so ticking the playhead does not refetch.
-            player.state
+            // A provider change is a real data change even when the track id stays
+            // the same, so changing Settings immediately refreshes the visible sheet.
+            val trackFlow = player.state
                 .map { it.track }
                 .distinctUntilChanged { old, new -> old?.id == new?.id }
+            val lyricsConfig = settingsStore.settings
+                .map { it.lyricsEnabled to it.lyricsProvider }
+                .distinctUntilChanged()
+            combine(trackFlow, lyricsConfig) { track, _ -> track }
                 .collect { track ->
                     _details.value = track?.let { repository.trackDetails(it) }
                 }
@@ -46,6 +54,7 @@ class NowPlayingViewModel(
     fun onNext() = player.next()
     fun onPrevious() = player.previous()
     fun onSeek(fraction: Float) = player.seekToFraction(fraction)
+    fun onSeekTo(positionMs: Long) = player.seekTo(positionMs)
     fun onToggleShuffle() = player.toggleShuffle()
     fun onCycleRepeat() = player.cycleRepeatMode()
     fun onToggleSaved() = player.toggleSaved()
@@ -58,11 +67,23 @@ class NowPlayingViewModel(
      */
     fun onPlayTrack(track: Track) {
         val current = _details.value
+        val currentTrack = player.state.value.track
+        fun queueWithCurrent(candidates: List<Track>): List<Track> = buildList {
+            currentTrack?.let(::add)
+            addAll(candidates)
+        }.distinctBy { it.id }
+
         val queue = when {
             current == null -> listOf(track)
-            current.albumTracks.any { it.id == track.id } -> current.albumTracks
-            current.moreByArtist.any { it.id == track.id } -> current.moreByArtist
-            current.recommendations.any { it.id == track.id } -> current.recommendations
+            current.albumTracks.any { it.id == track.id } ->
+                queueWithCurrent(current.albumTracks)
+
+            current.moreByArtist.any { it.id == track.id } ->
+                queueWithCurrent(current.moreByArtist)
+
+            current.recommendations.any { it.id == track.id } ->
+                queueWithCurrent(current.recommendations)
+
             else -> listOf(track)
         }
         player.play(track, queue)

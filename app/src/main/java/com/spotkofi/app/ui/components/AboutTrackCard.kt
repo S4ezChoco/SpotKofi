@@ -50,6 +50,9 @@ fun AboutTrackCard(
         track.durationMs.takeIf { it > 0L }?.let { add("Length" to it.asTrackDuration()) }
         if (track.isExplicit) add("Advisory" to "Explicit")
         credits?.channelName?.let { add("Published by" to it) }
+        credits?.publishedOn?.let { add("Published" to it) }
+        credits?.plays?.let { add("Views" to it.compactCount()) }
+        track.externalUrl?.takeIf { it.isNotBlank() }?.let { add("Source URL" to it) }
     }
     if (rows.isEmpty()) return
 
@@ -99,6 +102,27 @@ fun AboutTrackCard(
             }
         }
 
+        credits?.description?.takeIf { it.isNotBlank() }?.let { description ->
+            Spacer(Modifier.height(dimens.spaceSm))
+            Text(
+                text = "Description",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(horizontal = dimens.spaceLg),
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textPrimary,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(
+                    horizontal = dimens.spaceLg,
+                    vertical = dimens.spaceXs,
+                ),
+            )
+        }
+
         if (onExpand != null) {
             Spacer(Modifier.height(dimens.spaceXs))
             Text(
@@ -111,7 +135,13 @@ fun AboutTrackCard(
     }
 }
 
-@Preview(backgroundColor = 0xFF121212, showBackground = true)
+private fun Long.compactCount(): String = when {
+    this >= 1_000_000_000L -> "%.1fB".format(this / 1_000_000_000.0)
+    this >= 1_000_000L -> "%.1fM".format(this / 1_000_000.0)
+    this >= 1_000L -> "%.1fK".format(this / 1_000.0)
+    else -> toString()
+}
+
 @Composable
 private fun AboutTrackCardPreview() {
     SpotKofiTheme {
