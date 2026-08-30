@@ -14,7 +14,7 @@
          to Theme.SpotKofi via postSplashScreenTheme. -->
     <style name="Theme.SpotKofi.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/spotkofi_base</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/spotkofi_splash_logo</item>
         <item name="postSplashScreenTheme">@style/Theme.SpotKofi</item>
     </style>
 

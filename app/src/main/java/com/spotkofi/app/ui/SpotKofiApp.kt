@@ -71,7 +71,6 @@ import com.spotkofi.app.feature.settings.SettingsScreen
 import com.spotkofi.app.ui.components.CreatePlaylistDialog
 import com.spotkofi.app.ui.components.MiniPlayer
 import com.spotkofi.app.ui.components.SpotKofiDrawer
-import com.spotkofi.app.ui.components.SpotKofiLaunchOverlay
 import com.spotkofi.app.ui.components.rememberSpotKofiDrawerState
 import com.spotkofi.app.ui.navigation.CollectionRoute
 import com.spotkofi.app.ui.navigation.ExploreRoute
@@ -143,7 +142,6 @@ fun SpotKofiApp(
             val settings by container.settingsStore.settings.collectAsStateWithLifecycle()
 
             var showPlaylistDialog by remember { mutableStateOf(false) }
-            var showLaunchOverlay by remember { mutableStateOf(true) }
 
             // ---------------- Player position: one value, one owner ----------------
             // 0 = fully open, 1 = fully off the bottom. This single number drives the
@@ -608,16 +606,10 @@ fun SpotKofiApp(
                             )
                         }
                     }
-
-                    if (showLaunchOverlay) {
-                        SpotKofiLaunchOverlay(
-                            onFinished = { showLaunchOverlay = false },
-                        )
-                    }
-                }
             }
         }
     }
+}
 }
 }
 
