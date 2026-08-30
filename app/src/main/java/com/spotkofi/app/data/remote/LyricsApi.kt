@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import com.spotkofi.app.core.AppConstants
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -89,10 +90,10 @@ internal class LyricsApi(
         const val BASE_URL = "https://lrclib.net"
 
         /**
-         * The provider asks clients to identify themselves and to link back, so
-         * this is a real contact string rather than a browser impersonation.
+         * The provider asks clients to identify themselves, so this is the real
+         * product string rather than a browser impersonation.
          */
-        const val USER_AGENT = "SpotKofi/1.0 (https://github.com/spotkofi)"
+        val USER_AGENT: String = AppConstants.USER_AGENT
 
         fun defaultLyricsClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)

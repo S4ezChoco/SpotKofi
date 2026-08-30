@@ -33,7 +33,9 @@ android {
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
-        versionName = "0.1.0"
+        // Read back through AppConstants.VERSION_NAME, which is what the footer and
+        // the About rows display. Keep the two in step by only editing this line.
+        versionName = "1.0.0"
 
         vectorDrawables.useSupportLibrary = true
 

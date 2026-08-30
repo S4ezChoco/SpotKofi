@@ -44,6 +44,7 @@ import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.data.repository.previewHomeSections
 import com.spotkofi.app.data.repository.previewQuickPicks
 import com.spotkofi.app.data.service.DownloadItem
+import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.ProfileAvatar
@@ -256,6 +257,7 @@ private fun HomeContent(
                         )
                     }
                 }
+                item(key = "empty_footer") { AppFooter() }
                 return@LazyColumn
             }
 
@@ -318,6 +320,8 @@ private fun HomeContent(
                     }
                 }
             }
+
+            item(key = "footer") { AppFooter() }
         }
     }
 }

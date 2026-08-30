@@ -178,6 +178,20 @@ class LocalMusicStore(context: Context) {
         }
     }
 
+    /**
+     * Forgets every play.
+     *
+     * Only the history table is emptied. Track snapshots are left alone because
+     * saved songs, playlists and the queue all reference them, and deleting the
+     * snapshot rows would strip titles and artwork out of those lists too.
+     */
+    fun clearHistory() {
+        scope.launch {
+            helper.writableDatabase.delete(TABLE_HISTORY, null, null)
+            refreshAll()
+        }
+    }
+
     fun toggleCollection(collection: MediaCollection) {
         scope.launch {
             val db = helper.writableDatabase
@@ -217,7 +231,7 @@ class LocalMusicStore(context: Context) {
     suspend fun createPlaylist(name: String, description: String = ""): Playlist =
         withContext(Dispatchers.IO) {
             val playlist = Playlist(
-                id = "local:playlist:${UUID.randomUUID()}",
+                id = "$LOCAL_PLAYLIST_PREFIX${UUID.randomUUID()}",
                 title = name.trim().ifBlank { "My playlist" },
                 description = description.trim(),
                 ownerName = "You",
@@ -400,11 +414,18 @@ class LocalMusicStore(context: Context) {
         _savedCollections.value = readCollections(db, TABLE_SAVED_COLLECTIONS, "saved_at DESC")
         _savedTracks.value = readTracks(db, TABLE_SAVED_TRACKS, "saved_at DESC")
         _history.value = readTracks(db, TABLE_HISTORY, "played_at DESC")
+        // Only playlists this app created.
+        //
+        // Saving a provider playlist also writes a collections row of type
+        // "playlist", so an unfiltered read listed remote playlists as the user's
+        // own - and offered them in "add to playlist", where adding a track locally
+        // would have meant nothing. Saved remote playlists still appear in Your
+        // Library through savedCollections.
         _playlists.value = db.query(
             TABLE_COLLECTIONS,
             null,
-            "type = ?",
-            arrayOf(TYPE_PLAYLIST),
+            "type = ? AND id LIKE ?",
+            arrayOf(TYPE_PLAYLIST, "$LOCAL_PLAYLIST_PREFIX%"),
             null,
             null,
             "created_at DESC",
@@ -574,7 +595,10 @@ class LocalMusicStore(context: Context) {
             TYPE_ALBUM -> Album(
                 id = getString(getColumnIndexOrThrow("id")),
                 title = getString(getColumnIndexOrThrow("title")),
-                artistName = getString(getColumnIndexOrThrow("artist_name").coerceAtLeast(0)),
+                // Read as nullable: the column is genuinely empty for collections
+                // that arrived without a performer, and coercing the column *index*
+                // (which is what this used to do) read a different column entirely.
+                artistName = getNullableString("artist_name").orEmpty(),
                 year = getNullableInt("year"),
                 genre = getNullableString("genre"),
                 trackCount = getInt(getColumnIndexOrThrow("track_count")),
@@ -738,6 +762,14 @@ class LocalMusicStore(context: Context) {
     }
 
     private companion object {
+        /**
+         * Id prefix for playlists created in this app.
+         *
+         * It is what separates the user's own playlists from provider playlists
+         * they merely saved, both of which live in the same table.
+         */
+        const val LOCAL_PLAYLIST_PREFIX = "local:playlist:"
+
         const val TABLE_TRACKS = "tracks"
         const val TABLE_COLLECTIONS = "collections"
         const val TABLE_SAVED_TRACKS = "saved_tracks"

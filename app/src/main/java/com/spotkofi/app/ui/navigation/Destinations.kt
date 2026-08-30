@@ -43,6 +43,20 @@ data object LibraryRoute
 @Serializable
 data class CollectionRoute(val id: String)
 
+/** Charts, moods and genres, new releases and trending playlists. */
+@Serializable
+data object ExploreRoute
+
+/**
+ * One mood, moment or genre page.
+ *
+ * [params] is the provider's own opaque token for the category and is the only
+ * thing that can address the page, so it travels as a route argument. [title] rides
+ * along purely so the app bar has something to show before the page responds.
+ */
+@Serializable
+data class MoodRoute(val title: String, val params: String)
+
 /*
  * There is no NowPlaying route on purpose.
  *

@@ -165,6 +165,64 @@ data class Conversation(
     val isSharedTrack: Boolean = false,
 )
 
+/*
+ * ---------------------------------------------------------------------------
+ * Explore
+ *
+ * Charts, moods and genres come from the provider's own browse feeds, so these
+ * types mirror what those feeds actually return. Nothing here is synthesised: a
+ * shelf keeps the heading the provider gave it, and a rank is the position in the
+ * list the provider ordered.
+ * ---------------------------------------------------------------------------
+ */
+
+/** A country the provider publishes a chart for. */
+data class ChartRegion(
+    val code: String,
+    val name: String,
+)
+
+/**
+ * The chart page for one region.
+ *
+ * Songs and artists are kept apart from the playlist shelves because they are
+ * ranked lists, and a rank is only meaningful inside its own list.
+ */
+data class MusicChart(
+    val region: String,
+    val topSongs: List<Track> = emptyList(),
+    val topArtists: List<Artist> = emptyList(),
+    val shelves: List<Shelf> = emptyList(),
+) {
+    /** One titled carousel of playlists or albums, as the provider grouped it. */
+    data class Shelf(
+        val title: String,
+        val items: List<MediaCollection>,
+    )
+
+    val isEmpty: Boolean
+        get() = topSongs.isEmpty() && topArtists.isEmpty() && shelves.isEmpty()
+}
+
+/**
+ * One mood or genre tile.
+ *
+ * [params] is the opaque token the provider needs to open the category; it is
+ * carried through the UI untouched because nothing else can reconstruct it.
+ */
+data class MoodCategory(
+    val title: String,
+    val params: String,
+    /** Stripe colour supplied by the provider, or null when it sent none. */
+    val colorArgb: Long? = null,
+)
+
+/** A titled group of mood or genre tiles, e.g. "Moods & moments". */
+data class MoodGroup(
+    val title: String,
+    val items: List<MoodCategory>,
+)
+
 /** A card in the Search screen's Explore shelves. */
 data class ExploreItem(
     val id: String,
@@ -208,7 +266,34 @@ data class TrackDetails(
      * generated locally to fill the gap.
      */
     val lyrics: TrackLyrics? = null,
+    /**
+     * Publisher information for this recording, when the provider had any.
+     *
+     * Best-effort: it is a second request that is allowed to fail without costing
+     * the rest of the page.
+     */
+    val credits: TrackCredits? = null,
 )
+
+/**
+ * What the provider publishes about a recording.
+ *
+ * Deliberately short. Songwriter, producer and label are not here because no
+ * source in this app supplies them, and a credits panel that fills those rows with
+ * guesses would be stating things about real people that nobody verified.
+ */
+data class TrackCredits(
+    /** The channel that published the recording. */
+    val channelName: String? = null,
+    val plays: Long? = null,
+    /** ISO date, as published. */
+    val publishedOn: String? = null,
+    val description: String? = null,
+) {
+    val hasAny: Boolean
+        get() = channelName != null || plays != null ||
+            publishedOn != null || !description.isNullOrBlank()
+}
 
 /**
  * Lyrics as returned by the provider, in whichever forms it had.

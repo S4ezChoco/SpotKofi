@@ -18,7 +18,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.data.model.TrackCredits
 import com.spotkofi.app.data.model.asTrackDuration
+import com.spotkofi.app.ui.motion.clickableScale
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 
 /**
@@ -34,6 +36,9 @@ fun AboutTrackCard(
     track: Track,
     genre: String?,
     modifier: Modifier = Modifier,
+    credits: TrackCredits? = null,
+    /** Opens the full credits sheet. Null makes the card read-only. */
+    onExpand: (() -> Unit)? = null,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -44,6 +49,7 @@ fun AboutTrackCard(
         genre?.takeIf { it.isNotBlank() }?.let { add("Genre" to it) }
         track.durationMs.takeIf { it > 0L }?.let { add("Length" to it.asTrackDuration()) }
         if (track.isExplicit) add("Advisory" to "Explicit")
+        credits?.channelName?.let { add("Published by" to it) }
     }
     if (rows.isEmpty()) return
 
@@ -52,6 +58,13 @@ fun AboutTrackCard(
             .fillMaxWidth()
             .clip(SpotKofiTheme.shapes.card)
             .background(colors.card)
+            .then(
+                if (onExpand != null) {
+                    Modifier.clickableScale(pressedScale = 0.99f, onClick = onExpand)
+                } else {
+                    Modifier
+                },
+            )
             .padding(vertical = dimens.spaceMd),
     ) {
         Text(
@@ -84,6 +97,16 @@ fun AboutTrackCard(
                     modifier = Modifier.weight(1f),
                 )
             }
+        }
+
+        if (onExpand != null) {
+            Spacer(Modifier.height(dimens.spaceXs))
+            Text(
+                text = "Tap for full credits",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textTertiary,
+                modifier = Modifier.padding(horizontal = dimens.spaceLg),
+            )
         }
     }
 }

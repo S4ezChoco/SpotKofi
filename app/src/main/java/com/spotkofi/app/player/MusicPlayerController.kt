@@ -7,6 +7,7 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.datasource.DataSource
+import com.spotkofi.app.data.local.AppSettings
 import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.RepeatMode
@@ -39,6 +40,11 @@ class MusicPlayerController(
     private val musicService: MusicService,
     private val localStore: LocalMusicStore,
     dataSourceFactory: DataSource.Factory? = null,
+    /**
+     * Read lazily rather than captured, so toggling a playback preference takes
+     * effect on the next action instead of the next launch.
+     */
+    private val settingsProvider: () -> AppSettings = { AppSettings() },
 ) : PlayerController, QueueController {
 
     /**
@@ -122,8 +128,19 @@ class MusicPlayerController(
     private val _queue = MutableStateFlow<List<Track>>(emptyList())
     override val queue: StateFlow<List<Track>> = _queue.asStateFlow()
 
-    /** Restores the last queue before accepting a user mutation. */
+    /**
+     * Restores the last queue before accepting a user mutation.
+     *
+     * The job is always created, even when restoring is switched off, because every
+     * queue mutation joins it. Skipping the read rather than skipping the job keeps
+     * those call sites correct without each of them having to know about the setting.
+     */
     private val restoreJob = coroutineScope.launch {
+        if (!settingsProvider().restoreQueueOnStart) {
+            // The stored queue is left on disk. Turning the setting back on should
+            // bring the queue back rather than have silently discarded it.
+            return@launch
+        }
         val restored = localStore.loadQueue()
         if (!released && _queue.value.isEmpty() && restored.isNotEmpty()) {
             _queue.value = restored

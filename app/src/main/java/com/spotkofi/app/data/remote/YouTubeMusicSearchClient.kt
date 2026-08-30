@@ -1,232 +1,295 @@
 package com.spotkofi.app.data.remote
 
+import com.spotkofi.app.data.model.Album
+import com.spotkofi.app.data.model.Artist
+import com.spotkofi.app.data.model.MediaCollection
+import com.spotkofi.app.data.model.Playlist
+import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.data.remote.Innertube.browseId
+import com.spotkofi.app.data.remote.Innertube.columnRuns
+import com.spotkofi.app.data.remote.Innertube.containsString
+import com.spotkofi.app.data.remote.Innertube.continuationToken
+import com.spotkofi.app.data.remote.Innertube.isMeaningful
+import com.spotkofi.app.data.remote.Innertube.pageType
+import com.spotkofi.app.data.remote.Innertube.runObjects
+import com.spotkofi.app.data.remote.Innertube.runText
+import com.spotkofi.app.data.remote.Innertube.string
+import com.spotkofi.app.data.remote.Innertube.thumbnailUrl
+import com.spotkofi.app.data.remote.Innertube.walkObjects
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 /**
- * A song-only YouTube Music search result. All fields come from the same
- * musicResponsiveListItemRenderer, so a video ID can never be paired with
- * unrelated catalog metadata merely because it was the first global match.
- */
-internal data class YouTubeSongCandidate(
-    val videoId: String,
-    val title: String,
-    val artistName: String,
-    val albumTitle: String? = null,
-    val durationMs: Long = 0L,
-    val artworkUrl: String? = null,
-    val isExplicit: Boolean = false,
-)
-
-/**
- * Structured YouTube Music search modeled after the song-filtered path used by
- * InnerTune and SimpMusic. It follows a small number of continuations so the
- * search screen gets a useful list instead of only the first hit.
+ * YouTube Music search.
+ *
+ * Every result type is fetched from YouTube rather than only songs. Artists and
+ * albums used to be borrowed from a different catalog and merged in, which is why
+ * a search could show an artist card that had nothing to do with the songs above
+ * it and could not be opened.
+ *
+ * Each result type has its own filter parameter, so the four lists are four small
+ * focused requests instead of one unfiltered response that has to be sorted out
+ * afterwards.
  */
 internal class YouTubeMusicSearchClient(
-    private val client: OkHttpClient = defaultClient(),
+    private val client: OkHttpClient = Innertube.defaultClient(),
 ) {
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
+    suspend fun searchSongs(
+        query: String,
+        limit: Int = DEFAULT_SONG_LIMIT,
+        country: String = "US",
+    ): List<Track> = withContext(Dispatchers.IO) {
+        pagedSearch(
+            query = query,
+            filter = Innertube.FILTER_SONGS,
+            limit = limit,
+            country = country,
+            key = { it.id },
+        ) { root ->
+            root.walkObjects()
+                .mapNotNull { it["musicResponsiveListItemRenderer"] as? JsonObject }
+                .mapNotNull(Innertube::parseSongRow)
+                .toList()
+        }
     }
 
-    suspend fun searchSongs(query: String, limit: Int = DEFAULT_LIMIT): List<YouTubeSongCandidate> =
-        withContext(Dispatchers.IO) {
-            val term = query.trim()
-            if (term.isEmpty()) return@withContext emptyList()
+    suspend fun searchArtists(
+        query: String,
+        limit: Int = DEFAULT_COLLECTION_LIMIT,
+        country: String = "US",
+    ): List<Artist> = withContext(Dispatchers.IO) {
+        pagedSearch(
+            query = query,
+            filter = FILTER_ARTISTS,
+            limit = limit,
+            country = country,
+            key = { it.id },
+        ) { root -> parseArtists(root) }
+    }
 
-            val results = LinkedHashMap<String, YouTubeSongCandidate>()
-            var responseText = requestSearch(term, continuation = null)
-            var page = 0
+    suspend fun searchAlbums(
+        query: String,
+        limit: Int = DEFAULT_COLLECTION_LIMIT,
+        country: String = "US",
+    ): List<Album> = withContext(Dispatchers.IO) {
+        pagedSearch(
+            query = query,
+            filter = FILTER_ALBUMS,
+            limit = limit,
+            country = country,
+            key = { it.id },
+        ) { root -> parseAlbums(root) }
+    }
 
-            while (responseText != null && page < MAX_PAGES && results.size < limit) {
-                val root = runCatching { json.parseToJsonElement(responseText) }.getOrNull()
-                    ?: break
-                parseSongs(root).forEach { candidate ->
-                    if (results.size < limit) results.putIfAbsent(candidate.videoId, candidate)
-                }
-                if (results.size >= limit) break
+    suspend fun searchPlaylists(
+        query: String,
+        limit: Int = DEFAULT_COLLECTION_LIMIT,
+        country: String = "US",
+    ): List<Playlist> = withContext(Dispatchers.IO) {
+        pagedSearch(
+            query = query,
+            filter = FILTER_PLAYLISTS,
+            limit = limit,
+            country = country,
+            key = { it.id },
+        ) { root -> parsePlaylists(root) }
+    }
 
-                val continuation = continuationToken(root) ?: break
-                responseText = requestSearch(query = null, continuation = continuation)
-                page++
+    /**
+     * Runs one filtered search and follows continuations until [limit] is reached.
+     *
+     * Deduplication is by the caller's [key] rather than by object equality: the
+     * same song legitimately appears in more than one shelf of a response, and a
+     * results list that repeats a row looks broken.
+     */
+    private inline fun <T> pagedSearch(
+        query: String,
+        filter: String,
+        limit: Int,
+        country: String,
+        key: (T) -> String,
+        parse: (JsonElement) -> List<T>,
+    ): List<T> {
+        val term = query.trim()
+        if (term.isEmpty() || limit <= 0) return emptyList()
+
+        val results = LinkedHashMap<String, T>()
+        var responseText = request(term, filter, continuation = null, country = country)
+        var page = 0
+
+        while (responseText != null && page < MAX_PAGES && results.size < limit) {
+            val root = runCatching { Innertube.json.parseToJsonElement(responseText) }.getOrNull()
+                ?: break
+            parse(root).forEach { item ->
+                if (results.size < limit) results.putIfAbsent(key(item), item)
             }
+            if (results.size >= limit) break
 
-            results.values.take(limit)
+            val continuation = (root as? JsonObject)?.continuationToken() ?: break
+            responseText = request(query = null, filter = filter, continuation = continuation, country = country)
+            page++
         }
 
-    private fun requestSearch(query: String?, continuation: String?): String? {
-        val body = buildJsonObject {
-            put("context", buildJsonObject {
-                put("client", buildJsonObject {
-                    put("clientName", JsonPrimitive(CLIENT_NAME))
-                    put("clientVersion", JsonPrimitive(CLIENT_VERSION))
-                    put("hl", JsonPrimitive("en"))
-                    put("gl", JsonPrimitive("US"))
-                })
-            })
-            if (continuation != null) {
-                put("continuation", JsonPrimitive(continuation))
-            } else {
-                put("query", JsonPrimitive(query.orEmpty()))
-                put("params", JsonPrimitive(SONG_FILTER))
-            }
-        }.toString()
-
-        val url = ENDPOINT.toHttpUrl().newBuilder()
-            .addQueryParameter("key", API_KEY)
-            .build()
-        val request = Request.Builder()
-            .url(url)
-            .post(body.toRequestBody(JSON_MEDIA_TYPE))
-            .header("Content-Type", "application/json")
-            .header("Origin", "https://music.youtube.com")
-            .header("Referer", "https://music.youtube.com/")
-            .build()
-
-        return runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                response.body.string()
-            }
-        }.getOrNull()
+        return results.values.take(limit)
     }
 
-    private fun parseSongs(root: JsonElement): List<YouTubeSongCandidate> =
-        root.walkObjects()
-            .mapNotNull { it["musicResponsiveListItemRenderer"] as? JsonObject }
-            .mapNotNull(::parseSongRenderer)
-            .toList()
+    private fun request(
+        query: String?,
+        filter: String,
+        continuation: String?,
+        country: String,
+    ): String? = Innertube.post(
+        client = client,
+        endpoint = Innertube.SEARCH_ENDPOINT,
+        body = Innertube.searchBody(
+            query = query,
+            params = filter.takeIf { continuation == null },
+            continuation = continuation,
+            country = country,
+        ),
+    )
 
-    private fun parseSongRenderer(renderer: JsonObject): YouTubeSongCandidate? {
-        val videoId = (renderer["playlistItemData"] as? JsonObject)
-            ?.string("videoId")
-            ?: renderer.string("videoId")
-            ?: return null
+    // ---- Collection parsing --------------------------------------------
 
-        val columns = renderer["flexColumns"] as? JsonArray ?: return null
-        val title = columns.firstOrNull()
+    private fun parseArtists(root: JsonElement): List<Artist> = root.walkObjects()
+        .mapNotNull { it["musicResponsiveListItemRenderer"] as? JsonObject }
+        .filter { it.pageType() == Innertube.PAGE_TYPE_ARTIST }
+        .mapNotNull { renderer ->
+            val id = renderer.browseId()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val name = renderer.rowTitle() ?: return@mapNotNull null
+            Artist(
+                id = YouTubeIds.artist(id),
+                name = name,
+                // The subtitle here is a subscriber count, which is a metric rather
+                // than a genre, so it is dropped instead of being printed under the
+                // name as if it described the music.
+                genre = null,
+                artworkUrl = renderer.thumbnailUrl(),
+            )
+        }
+        .toList()
+
+    private fun parseAlbums(root: JsonElement): List<Album> = root.walkObjects()
+        .mapNotNull { it["musicResponsiveListItemRenderer"] as? JsonObject }
+        .filter { it.pageType() == Innertube.PAGE_TYPE_ALBUM }
+        .mapNotNull { renderer ->
+            val id = renderer.browseId()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = renderer.rowTitle() ?: return@mapNotNull null
+            val subtitle = renderer.subtitleValues()
+            Album(
+                id = YouTubeIds.album(id),
+                title = title,
+                artistName = subtitle.firstOrNull { it.toIntOrNull() == null }.orEmpty(),
+                year = subtitle.firstNotNullOfOrNull { it.toReleaseYear() },
+                artworkUrl = renderer.thumbnailUrl(),
+            )
+        }
+        .toList()
+
+    private fun parsePlaylists(root: JsonElement): List<Playlist> = root.walkObjects()
+        .mapNotNull { it["musicResponsiveListItemRenderer"] as? JsonObject }
+        .filter { it.pageType() == Innertube.PAGE_TYPE_PLAYLIST }
+        .mapNotNull { renderer ->
+            val id = renderer.browseId()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = renderer.rowTitle() ?: return@mapNotNull null
+            val subtitle = renderer.subtitleValues()
+            Playlist(
+                id = YouTubeIds.playlist(id),
+                title = title,
+                description = subtitle.firstOrNull().orEmpty(),
+                ownerName = subtitle.firstOrNull().orEmpty().ifEmpty { "YouTube Music" },
+                artworkUrl = renderer.thumbnailUrl(),
+            )
+        }
+        .toList()
+
+    private fun JsonObject.rowTitle(): String? {
+        val columns = this["flexColumns"] as? JsonArray
+        val fromColumn = columns?.firstOrNull()
             .columnRuns()
             .firstOrNull()
             ?.string("text")
             ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: return null
-
-        val secondaryValues = columns.getOrNull(1)
-            .columnRuns()
-            .mapNotNull { it.string("text")?.trim() }
-            .filterNot(::isSeparator)
-            .filter { it.isNotEmpty() }
-        val durationMs = secondaryValues.asReversed()
-            .firstNotNullOfOrNull(::parseDurationMs)
-            ?: 0L
-        val artistName = secondaryValues
-            .firstOrNull { parseDurationMs(it) == null }
-            ?: return null
-        val albumTitle = secondaryValues
-            .drop(1)
-            .firstOrNull { parseDurationMs(it) == null }
-
-        return YouTubeSongCandidate(
-            videoId = videoId,
-            title = title,
-            artistName = artistName,
-            albumTitle = albumTitle,
-            durationMs = durationMs,
-            artworkUrl = renderer.thumbnailUrl(),
-            isExplicit = renderer.containsString("iconType", EXPLICIT_BADGE),
-        )
+        val title = fromColumn ?: this["title"].runText()
+        return title?.takeIf { it.isNotEmpty() && !Innertube.isPlaceholder(it) }
     }
 
-    private fun continuationToken(root: JsonElement): String? = root.walkObjects()
-        .mapNotNull { objectValue ->
-            (objectValue["nextContinuationData"] as? JsonObject)
-                ?.string("continuation")
-                ?: (objectValue["continuationCommand"] as? JsonObject)
-                    ?.string("token")
-        }
-        .firstOrNull()
-
-    private fun JsonElement?.columnRuns(): List<JsonObject> {
-        val column = this as? JsonObject ?: return emptyList()
-        val renderer = column["musicResponsiveListItemFlexColumnRenderer"] as? JsonObject
-            ?: return emptyList()
-        val text = renderer["text"] as? JsonObject ?: return emptyList()
-        return (text["runs"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
+    private fun JsonObject.subtitleValues(): List<String> {
+        val columns = this["flexColumns"] as? JsonArray
+        val runs = columns?.drop(1)?.flatMap { it.columnRuns() }
+            ?: this["subtitle"].runObjects()
+        return runs.mapNotNull { it.string("text")?.trim() }.filter { isMeaningful(it) }
     }
 
-    private fun JsonObject.thumbnailUrl(): String? = walkObjects()
-        .mapNotNull { it["thumbnails"] as? JsonArray }
-        .flatMap { it.asSequence() }
-        .mapNotNull { it as? JsonObject }
-        .mapNotNull { it.string("url") }
-        .lastOrNull()
+    private fun String.toReleaseYear(): Int? =
+        trim().toIntOrNull()?.takeIf { it in 1900..2100 }
 
-    private fun JsonObject.containsString(key: String, expected: String): Boolean =
-        walkObjects().any { it.string(key) == expected }
-
-    private fun JsonObject.string(key: String): String? =
-        this[key]?.jsonPrimitive?.contentOrNull
-
-    private fun JsonElement.walkObjects(): Sequence<JsonObject> = sequence {
-        when (val element = this@walkObjects) {
-            is JsonObject -> {
-                yield(element)
-                element.values.forEach { child -> yieldAll(child.walkObjects()) }
-            }
-
-            is JsonArray -> element.forEach { child -> yieldAll(child.walkObjects()) }
-            else -> Unit
-        }
-    }
-
-    private fun parseDurationMs(value: String): Long? {
-        val parts = value.split(':').map { it.toLongOrNull() ?: return null }
-        if (parts.size !in 2..3) return null
-        val seconds = if (parts.size == 2) {
-            parts[0] * 60L + parts[1]
-        } else {
-            parts[0] * 3_600L + parts[1] * 60L + parts[2]
-        }
-        return seconds.takeIf { it > 0L }?.times(1000L)
-    }
-
-    private fun isSeparator(value: String): Boolean =
-        value == "•" || value == "·" || value == "|"
+    /** Kept for callers that only need to know whether the row is explicit. */
+    @Suppress("unused")
+    private fun JsonObject.isExplicit(): Boolean =
+        containsString("iconType", Innertube.EXPLICIT_BADGE)
 
     private companion object {
-        const val DEFAULT_LIMIT = 25
+        const val DEFAULT_SONG_LIMIT = 25
+        const val DEFAULT_COLLECTION_LIMIT = 12
         const val MAX_PAGES = 3
-        const val CLIENT_NAME = "WEB_REMIX"
-        const val CLIENT_VERSION = "1.20241231.01.00"
-        const val SONG_FILTER = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
-        const val API_KEY = "AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI"
-        const val ENDPOINT = "https://music.youtube.com/youtubei/v1/search"
-        val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
-        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .callTimeout(30, TimeUnit.SECONDS)
-            .build()
-
-        const val EXPLICIT_BADGE = "MUSIC_EXPLICIT_BADGE"
+        /**
+         * Result-type filters, stored decoded.
+         *
+         * They are the standard YouTube Music search filters; the trailing `==` is
+         * real base64 padding and must not be percent-escaped, because the value
+         * travels inside a JSON body where `%3D` is just two literal characters.
+         */
+        const val FILTER_ALBUMS = "EgWKAQIYAWoKEAkQChAFEAMQBA=="
+        const val FILTER_ARTISTS = "EgWKAQIgAWoKEAkQChAFEAMQBA=="
+        const val FILTER_PLAYLISTS = "EgWKAQIoAWoKEAkQChAFEAMQBA=="
     }
 }
+
+/**
+ * Identity scheme for YouTube-sourced collections.
+ *
+ * A YouTube browse ID is opaque and can collide with the other catalog's numeric
+ * ids, so every id carries the provider and the kind it came from. Detail lookups
+ * read the prefix to decide which endpoint to call, which is what lets a search
+ * result actually open instead of resolving to nothing.
+ */
+internal object YouTubeIds {
+
+    const val ARTIST_PREFIX = "ytartist:"
+    const val ALBUM_PREFIX = "ytalbum:"
+    const val PLAYLIST_PREFIX = "ytplaylist:"
+
+    fun artist(browseId: String): String = ARTIST_PREFIX + browseId
+
+    fun album(browseId: String): String = ALBUM_PREFIX + browseId
+
+    fun playlist(browseId: String): String = PLAYLIST_PREFIX + browseId
+
+    fun rawId(id: String): String? = when {
+        id.startsWith(ARTIST_PREFIX) -> id.removePrefix(ARTIST_PREFIX)
+        id.startsWith(ALBUM_PREFIX) -> id.removePrefix(ALBUM_PREFIX)
+        id.startsWith(PLAYLIST_PREFIX) -> id.removePrefix(PLAYLIST_PREFIX)
+        else -> null
+    }?.takeIf { it.isNotBlank() }
+
+    fun isYouTube(id: String): Boolean = rawId(id) != null
+
+    fun kindOf(id: String): Kind? = when {
+        id.startsWith(ARTIST_PREFIX) -> Kind.Artist
+        id.startsWith(ALBUM_PREFIX) -> Kind.Album
+        id.startsWith(PLAYLIST_PREFIX) -> Kind.Playlist
+        else -> null
+    }
+
+    enum class Kind { Artist, Album, Playlist }
+}
+
+/** Convenience so callers can treat any collection uniformly. */
+internal fun MediaCollection.isYouTubeSourced(): Boolean = YouTubeIds.isYouTube(id)

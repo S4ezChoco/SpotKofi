@@ -53,6 +53,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.spotkofi.app.core.AppContainer
 import com.spotkofi.app.core.LocalAppContainer
+import com.spotkofi.app.feature.browse.ExploreScreen
+import com.spotkofi.app.feature.browse.MoodCategoryScreen
 import com.spotkofi.app.feature.collection.CollectionScreen
 import com.spotkofi.app.feature.home.HomeScreen
 import com.spotkofi.app.feature.library.LibraryScreen
@@ -67,6 +69,8 @@ import com.spotkofi.app.ui.components.MiniPlayer
 import com.spotkofi.app.ui.components.SpotKofiDrawer
 import com.spotkofi.app.ui.components.rememberSpotKofiDrawerState
 import com.spotkofi.app.ui.navigation.CollectionRoute
+import com.spotkofi.app.ui.navigation.ExploreRoute
+import com.spotkofi.app.ui.navigation.MoodRoute
 import com.spotkofi.app.ui.navigation.HomeGraph
 import com.spotkofi.app.ui.navigation.HomeRoute
 import com.spotkofi.app.ui.navigation.LibraryGraph
@@ -119,6 +123,7 @@ fun SpotKofiApp(
             val drawerState = rememberSpotKofiDrawerState()
 
             val playbackState by container.playerController.state.collectAsStateWithLifecycle()
+            val settings by container.settingsStore.settings.collectAsStateWithLifecycle()
 
             var showCreateSheet by remember { mutableStateOf(false) }
             var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -159,15 +164,19 @@ fun SpotKofiApp(
             }
 
             /**
-             * Closing the player also stops playback.
+             * Closing the player, and stopping the audio if the user asked for that.
              *
              * Dismissing is the only gesture that means "I am done with this
              * song": collapsing with the chevron, pressing back and opening an
              * album from the player all keep audio running and go through
              * [settlePlayer] instead.
+             *
+             * Whether it also stops the audio is a preference, because both readings
+             * are reasonable: some people swipe the window away to get it out of the
+             * way, others to end the song.
              */
             fun closePlayer() {
-                container.playerController.stop()
+                if (settings.stopOnPlayerDismiss) container.playerController.stop()
                 settlePlayer(open = false)
             }
 
@@ -188,7 +197,11 @@ fun SpotKofiApp(
             // moves when someone actually taps a track, so an automatic queue
             // advance (and next/previous) now leaves the player exactly as the
             // user left it.
+            //
+            // Opening at all is a preference: with it off, tapping a song starts the
+            // audio and leaves the user on the list they were browsing.
             LaunchedEffect(playbackState.playRequestId) {
+                if (!settings.openPlayerOnPlay) return@LaunchedEffect
                 if (playbackState.playRequestId > 0L && playbackState.hasTrack) openPlayer()
             }
 
@@ -301,20 +314,30 @@ fun SpotKofiApp(
                             navController = navController,
                             startDestination = HomeGraph,
                             modifier = Modifier.fillMaxSize(),
-                            // Tab switches cross-fade. No scale: a screen that grows
-                            // or shrinks reads as the window moving towards or away
-                            // from the viewer, which is the "receding then closing"
-                            // effect that looked wrong on back.
+                            // Tab switches cross-fade with a short rise.
+                            //
+                            // Still no scale: a screen that grows or shrinks reads as
+                            // the window moving towards or away from the viewer, which
+                            // is the "receding then closing" effect that looked wrong
+                            // on back. The rise is a fraction of the screen, so it
+                            // gives the arriving tab a direction without turning a tab
+                            // switch into a push.
                             //
                             // The incoming fade is longer than the outgoing one and
                             // eased, so the two overlap instead of handing off at a
                             // hard edge. Timings come from Motion rather than being
                             // invented here.
                             enterTransition = {
-                                fadeIn(tween(Motion.Medium, easing = Motion.Emphasized))
+                                fadeIn(tween(Motion.Medium, easing = Motion.Emphasized)) +
+                                    slideInVertically(
+                                        tween(Motion.Medium, easing = Motion.Emphasized),
+                                    ) { height -> height / 22 }
                             },
                             exitTransition = {
-                                fadeOut(tween(Motion.Fast, easing = Motion.Standard))
+                                fadeOut(tween(Motion.Fast, easing = Motion.Standard)) +
+                                    slideOutVertically(
+                                        tween(Motion.Fast, easing = Motion.Standard),
+                                    ) { height -> -height / 40 }
                             },
                             // Nothing at all on the way back. On a pop the screen
                             // underneath was never gone, so animating it in makes it
@@ -352,9 +375,16 @@ fun SpotKofiApp(
                                             container.playerController.play(track, queue)
                                         },
                                         onOpenProfile = drawerState::open,
+                                        onExploreClick = {
+                                            navController.navigate(ExploreRoute)
+                                        },
                                         contentPadding = screenPadding,
                                     )
                                 }
+                                // Explore lives in the Search graph, so the Search
+                                // tab stays highlighted while browsing it and its
+                                // stack is kept when the user switches tabs away.
+                                exploreDestinations(navController, screenPadding)
                                 collectionDestination(navController, screenPadding)
                             }
 
@@ -552,9 +582,10 @@ fun SpotKofiApp(
                                 onDragStopped = { velocity ->
                                     val dismiss = playerPos.floatValue > DISMISS_FRACTION ||
                                         velocity > DISMISS_VELOCITY_PX
-                                    if (dismiss) {
+                                    if (dismiss && settings.stopOnPlayerDismiss) {
                                         // Swiping the page away closes the song, not
-                                        // just the window.
+                                        // just the window - unless the user turned
+                                        // that off in Settings.
                                         container.playerController.stop()
                                     }
                                     settlePlayer(open = !dismiss, velocityPxPerSec = velocity)
@@ -650,6 +681,68 @@ private fun NavGraphBuilder.collectionDestination(
         CollectionScreen(
             collectionId = route.id,
             onBack = navController::popBackStack,
+            contentPadding = screenPadding,
+        )
+    }
+}
+
+/**
+ * Explore and the mood/genre page it opens.
+ *
+ * Registered together and with the same transitions as [collectionDestination],
+ * because to the user these are the same kind of move: a push onto the tab they
+ * are already in.
+ */
+private fun NavGraphBuilder.exploreDestinations(
+    navController: NavHostController,
+    screenPadding: PaddingValues,
+) {
+    composable<ExploreRoute>(
+        enterTransition = {
+            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { it }
+        },
+        exitTransition = {
+            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+        },
+        popEnterTransition = {
+            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+        },
+        popExitTransition = {
+            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Accelerate)) { it }
+        },
+    ) {
+        ExploreScreen(
+            onBack = navController::popBackStack,
+            onCollectionClick = { navController.navigate(CollectionRoute(it)) },
+            onCategoryClick = { category ->
+                navController.navigate(
+                    MoodRoute(title = category.title, params = category.params),
+                )
+            },
+            contentPadding = screenPadding,
+        )
+    }
+
+    composable<MoodRoute>(
+        enterTransition = {
+            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { it }
+        },
+        exitTransition = {
+            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+        },
+        popEnterTransition = {
+            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+        },
+        popExitTransition = {
+            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Accelerate)) { it }
+        },
+    ) { entry ->
+        val route = entry.toRoute<MoodRoute>()
+        MoodCategoryScreen(
+            title = route.title,
+            params = route.params,
+            onBack = navController::popBackStack,
+            onCollectionClick = { navController.navigate(CollectionRoute(it)) },
             contentPadding = screenPadding,
         )
     }

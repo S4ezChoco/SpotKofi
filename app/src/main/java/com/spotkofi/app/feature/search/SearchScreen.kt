@@ -26,7 +26,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -61,6 +63,7 @@ import com.spotkofi.app.data.model.Playlist
 import com.spotkofi.app.data.model.SearchResults
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.asTrackDuration
+import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.SpotKofiChip
@@ -78,6 +81,15 @@ import kotlinx.coroutines.launch
  * that results feel like they arrive while typing.
  */
 private const val SearchDebounceMs = 280L
+
+/**
+ * Shortest query that is searched.
+ *
+ * A single letter matches almost everything, so the provider answered with a wide
+ * unrelated list - including rows with nothing usable in them - before the user
+ * had finished the first word. Below this the landing page stays put.
+ */
+private const val MinQueryLength = 2
 
 /** The standard result filters, in the order they are shown. */
 private enum class SearchFilter(val label: String) {
@@ -117,6 +129,7 @@ fun SearchScreen(
     onCollectionClick: (String) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
     onOpenProfile: () -> Unit,
+    onExploreClick: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val container = LocalAppContainer.current
@@ -138,7 +151,7 @@ fun SearchScreen(
     // longer publish over a newer one.
     LaunchedEffect(query) {
         val term = query.trim()
-        if (term.isEmpty()) {
+        if (term.length < MinQueryLength) {
             results = null
             error = null
             isSearching = false
@@ -190,7 +203,11 @@ fun SearchScreen(
 
             val current = results
             when {
-                query.isBlank() -> SearchLanding(onCategoryClick = { query = it.title })
+                query.trim().length < MinQueryLength ->
+                    SearchLanding(
+                        onCategoryClick = { query = it.title },
+                        onExploreClick = onExploreClick,
+                    )
 
                 error != null && current == null -> Box(
                     modifier = Modifier
@@ -213,7 +230,9 @@ fun SearchScreen(
 
                 else -> SearchResultsContent(
                     searchResults = current,
-                    playlists = playlists.filter {
+                    // The user's own playlists that match, ahead of the provider's,
+                    // because a library hit is the one the user already knows.
+                    localPlaylists = playlists.filter {
                         it.title.contains(query.trim(), ignoreCase = true)
                     },
                     filter = filter,
@@ -332,7 +351,7 @@ private fun SearchField(
 @Composable
 private fun ColumnScope.SearchResultsContent(
     searchResults: SearchResults,
-    playlists: List<Playlist>,
+    localPlaylists: List<Playlist>,
     filter: SearchFilter,
     onFilterChange: (SearchFilter) -> Unit,
     onCollectionClick: (String) -> Unit,
@@ -358,6 +377,13 @@ private fun ColumnScope.SearchResultsContent(
         searchResults.collections.filterIsInstance<Album>()
     }
     val songs = searchResults.tracks
+
+    // Local playlists first, then the provider's, with the user's own kept even if
+    // a remote playlist happens to share its title.
+    val playlists = remember(localPlaylists, searchResults) {
+        (localPlaylists + searchResults.collections.filterIsInstance<Playlist>())
+            .distinctBy { it.id }
+    }
 
     val showArtists = filter == SearchFilter.All || filter == SearchFilter.Artists
     val showSongs = filter == SearchFilter.All || filter == SearchFilter.Songs
@@ -423,18 +449,25 @@ private fun ColumnScope.SearchResultsContent(
                     items(albums, key = { "album_" + it.id }) { album ->
                         CollectionResultRow(
                             item = album,
-                            typeLabel = "Album · ${album.artistName}",
+                            typeLabel = listOfNotNull(
+                                "Album",
+                                album.artistName.takeIf { it.isNotBlank() },
+                                album.year?.toString(),
+                            ).joinToString(" · "),
                             onClick = { onCollectionClick(album.id) },
                         )
                     }
                 }
 
                 if (showPlaylists && playlists.isNotEmpty()) {
-                    item(key = "playlists_header") { ResultSectionHeader("Your playlists") }
+                    item(key = "playlists_header") { ResultSectionHeader("Playlists") }
                     items(playlists, key = { "playlist_" + it.id }) { playlist ->
                         CollectionResultRow(
                             item = playlist,
-                            typeLabel = "Playlist",
+                            typeLabel = playlist.ownerName
+                                .takeIf { it.isNotBlank() }
+                                ?.let { "Playlist · $it" }
+                                ?: "Playlist",
                             onClick = { onCollectionClick(playlist.id) },
                         )
                     }
@@ -457,6 +490,8 @@ private fun ColumnScope.SearchResultsContent(
                         )
                     }
                 }
+
+                item(key = "footer") { AppFooter() }
             }
 
             val track = selectedTrack
@@ -566,6 +601,7 @@ private fun CollectionResultRow(
 @Composable
 private fun ColumnScope.SearchLanding(
     onCategoryClick: (SearchCategory) -> Unit,
+    onExploreClick: () -> Unit,
 ) {
     val dimens = SpotKofiTheme.dimens
     val browseCategories = LocalAppContainer.current.musicRepository.browseCategories()
@@ -580,6 +616,13 @@ private fun ColumnScope.SearchLanding(
         ),
         verticalArrangement = Arrangement.spacedBy(dimens.spaceLg),
     ) {
+        // Explore leads the page.
+        //
+        // The categories below only prefill the search box, which is a shortcut for
+        // typing. Explore is the one entry here that opens real provider content -
+        // charts, moods, new releases - so burying it under four coloured tiles
+        // would hide the only thing on this screen that is not a search shortcut.
+        item { ExploreEntryCard(onClick = onExploreClick) }
         item {
             Text(
                 text = "Browse all",
@@ -630,6 +673,54 @@ private fun ColumnScope.SearchLanding(
                 )
             }
         }
+
+        item { AppFooter() }
+    }
+}
+
+/** Entry point to charts, moods and moments, genres, new releases and trending. */
+@Composable
+private fun ExploreEntryCard(onClick: () -> Unit) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SpotKofiTheme.shapes.tile)
+            .background(colors.card)
+            .clickable(onClick = onClick)
+            .padding(dimens.spaceLg),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Explore,
+            contentDescription = null,
+            tint = colors.accent,
+            modifier = Modifier.size(dimens.iconLg),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Explore",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = colors.textPrimary,
+            )
+            Text(
+                text = "Charts, moods and moments, genres, new releases",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            imageVector = Icons.Filled.ChevronRight,
+            contentDescription = null,
+            tint = colors.textTertiary,
+            modifier = Modifier.size(dimens.iconMd),
+        )
     }
 }
 

@@ -135,6 +135,16 @@ class DownloadManager(
     private val _totalDownloadStats = MutableStateFlow(DownloadStats())
     val totalDownloadStats: StateFlow<DownloadStats> = _totalDownloadStats.asStateFlow()
 
+    /**
+     * Priority applied when a caller does not name one.
+     *
+     * Kept here rather than threaded through every UI call site: a screen that
+     * forgot to pass the user's preference would silently queue at the wrong
+     * priority, and there is no way to notice that from the outside.
+     */
+    @Volatile
+    var defaultPriority: DownloadPriority = DownloadPriority.NORMAL
+
     init {
         downloadDirectory.mkdirs()
         temporaryDirectory.mkdirs()
@@ -154,7 +164,7 @@ class DownloadManager(
     }
 
     /** Performs the action appropriate for the current persisted state. */
-    fun toggleDownload(track: Track, priority: DownloadPriority = DownloadPriority.NORMAL) {
+    fun toggleDownload(track: Track, priority: DownloadPriority = defaultPriority) {
         when (val item = findByTrackId(track.id)) {
             null -> downloadTrack(track, priority)
             else -> when (item.status) {
@@ -168,7 +178,7 @@ class DownloadManager(
     }
 
     /** Enqueues a track, or resumes/retries its existing record instead of duplicating it. */
-    fun downloadTrack(track: Track, priority: DownloadPriority = DownloadPriority.NORMAL) {
+    fun downloadTrack(track: Track, priority: DownloadPriority = defaultPriority) {
         val existing = findByTrackId(track.id)
         when {
             existing?.status == DownloadManagerStatus.COMPLETED &&
@@ -211,7 +221,7 @@ class DownloadManager(
         processDownloadQueue()
     }
 
-    fun downloadTracks(tracks: List<Track>, priority: DownloadPriority = DownloadPriority.NORMAL) {
+    fun downloadTracks(tracks: List<Track>, priority: DownloadPriority = defaultPriority) {
         tracks.forEach { downloadTrack(it, priority) }
     }
 
@@ -297,24 +307,37 @@ class DownloadManager(
 
     fun getDownloadItemForTrack(trackId: String): DownloadItem? = findByTrackId(trackId)
 
+    /**
+     * Deletes every finished download.
+     *
+     * The file work is handed to this manager's IO scope rather than run inline.
+     * Deleting one file from a row tap is quick enough to do on the spot, but a
+     * library-wide clear is an unbounded number of deletes, and doing that on the
+     * caller's thread would freeze the screen that asked for it.
+     */
     fun clearCompletedDownloads() {
         val items = _completedDownloads.value
-        items.forEach { item ->
-            cleanupDownloadFiles(item)
-            removeItemFromAll(item.id)
-            removePersisted(item.track.id)
+        scope.launch {
+            items.forEach { item ->
+                cleanupDownloadFiles(item)
+                removeItemFromAll(item.id)
+                removePersisted(item.track.id)
+            }
+            updateStats()
         }
-        updateStats()
     }
 
+    /** As [clearCompletedDownloads], for the entries that failed. */
     fun clearFailedDownloads() {
         val items = _failedDownloads.value
-        items.forEach { item ->
-            cleanupDownloadFiles(item)
-            removeItemFromAll(item.id)
-            removePersisted(item.track.id)
+        scope.launch {
+            items.forEach { item ->
+                cleanupDownloadFiles(item)
+                removeItemFromAll(item.id)
+                removePersisted(item.track.id)
+            }
+            updateStats()
         }
-        updateStats()
     }
 
     fun getStats(): DownloadStats = _totalDownloadStats.value

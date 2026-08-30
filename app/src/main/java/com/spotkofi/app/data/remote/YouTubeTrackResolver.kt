@@ -51,19 +51,23 @@ internal class YouTubeTrackResolver(
         if (candidates.isEmpty()) return null
 
         val scored = candidates
-            .map { candidate -> candidate to score(candidate, track) }
-            .filter { (_, value) -> value >= MIN_SCORE }
-            .maxByOrNull { (_, value) -> value }
+            .mapNotNull { candidate ->
+                val videoId = candidate.videoId?.takeIf { it.isNotBlank() }
+                    ?: return@mapNotNull null
+                Triple(candidate, videoId, score(candidate, track))
+            }
+            .filter { (_, _, value) -> value >= MIN_SCORE }
+            .maxByOrNull { (_, _, value) -> value }
             ?: return null
 
-        return scored.first.videoId.also { videoId -> store(key, videoId) }
+        return scored.second.also { videoId -> store(key, videoId) }
     }
 
     /**
      * Higher is better. Title agreement dominates, because a wrong title is a
      * wrong song, while a missing album or an off-by-a-second duration is not.
      */
-    private fun score(candidate: YouTubeSongCandidate, track: Track): Int {
+    private fun score(candidate: Track, track: Track): Int {
         val candidateTitle = normalize(candidate.title)
         val wantedTitle = normalize(track.title)
         val candidateArtist = normalize(candidate.artistName)

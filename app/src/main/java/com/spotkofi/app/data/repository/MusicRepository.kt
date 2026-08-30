@@ -1,16 +1,27 @@
 package com.spotkofi.app.data.repository
 
 import com.spotkofi.app.data.model.BrowseCategory
+import com.spotkofi.app.data.model.ChartRegion
 import com.spotkofi.app.data.model.Conversation
 import com.spotkofi.app.data.model.ExploreItem
 import com.spotkofi.app.data.model.FriendActivity
 import com.spotkofi.app.data.model.HomeSection
 import com.spotkofi.app.data.model.HomeTab
 import com.spotkofi.app.data.model.MediaCollection
+import com.spotkofi.app.data.model.MoodCategory
+import com.spotkofi.app.data.model.MoodGroup
+import com.spotkofi.app.data.model.MusicChart
 import com.spotkofi.app.data.model.SearchResults
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.TrackDetails
 import kotlinx.coroutines.flow.Flow
+
+/** A mood or genre page as the UI consumes it. */
+data class MoodCategoryContents(
+    val title: String,
+    val songs: List<Track>,
+    val playlists: List<MediaCollection>,
+)
 
 /**
  * The music catalog, as the UI sees it.
@@ -57,6 +68,26 @@ interface MusicRepository {
     suspend fun exploreVideos(): List<ExploreItem>
 
     suspend fun explorePodcasts(): List<ExploreItem>
+
+    // -------------------------------------------------------------- explore
+
+    /** The regions a chart can be requested for. */
+    fun chartRegions(): List<ChartRegion>
+
+    /** Top songs, top artists and playlist shelves for [regionCode]. */
+    suspend fun chart(regionCode: String): MusicChart?
+
+    /** "Moods & moments" and "Genres", as the provider groups them. */
+    suspend fun moodsAndGenres(): List<MoodGroup>
+
+    /** The contents of one mood or genre tile. */
+    suspend fun moodCategory(category: MoodCategory): MoodCategoryContents?
+
+    /** Albums and singles the provider is currently featuring. */
+    suspend fun newReleases(): List<MediaCollection>
+
+    /** Playlists the provider is currently pushing in [regionCode]. */
+    suspend fun trendingPlaylists(regionCode: String): List<MediaCollection>
 
     // --------------------------------------------------------------- detail
 

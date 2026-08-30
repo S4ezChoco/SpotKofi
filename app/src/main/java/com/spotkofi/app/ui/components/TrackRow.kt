@@ -47,6 +47,14 @@ fun TrackRow(
     downloadStatus: DownloadManagerStatus? = null,
     /** Percent transferred, printed while a download is running or paused. */
     downloadProgress: Int = 0,
+    /**
+     * Extra control before the overflow button, e.g. the saved toggle in Your
+     * Library.
+     *
+     * A slot rather than another boolean flag: rows in different places need
+     * different affordances, and the row should not have to know about each one.
+     */
+    trailing: @Composable (() -> Unit)? = null,
     onMoreClick: (() -> Unit)? = null,
 ) {
     val colors = SpotKofiTheme.colors
@@ -85,7 +93,15 @@ fun TrackRow(
                     ExplicitBadge()
                 }
                 Text(
-                    text = track.artistName,
+                    // Album is appended only when the provider actually sent one, so
+                    // a song with an unknown album shows the artist alone instead of
+                    // a dangling separator or a filler word.
+                    text = listOfNotNull(
+                        track.artistName.takeIf { it.isNotBlank() },
+                        track.albumTitle.takeIf {
+                            it.isNotBlank() && !it.equals(track.title, ignoreCase = true)
+                        },
+                    ).joinToString(" \u2022 "),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -106,6 +122,11 @@ fun TrackRow(
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textTertiary,
             )
+        }
+
+        if (trailing != null) {
+            Spacer(Modifier.width(dimens.spaceSm))
+            trailing()
         }
 
         if (onMoreClick != null) {

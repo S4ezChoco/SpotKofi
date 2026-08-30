@@ -8,21 +8,29 @@ import com.spotkofi.app.data.model.ExploreItem
 import com.spotkofi.app.data.model.FriendActivity
 import com.spotkofi.app.data.model.HomeSection
 import com.spotkofi.app.data.model.HomeTab
+import com.spotkofi.app.data.model.ChartRegion
 import com.spotkofi.app.data.model.MediaCollection
-import com.spotkofi.app.data.model.ReleaseItem
+import com.spotkofi.app.data.model.MoodCategory
+import com.spotkofi.app.data.model.MoodGroup
+import com.spotkofi.app.data.model.MusicChart
 import com.spotkofi.app.data.model.SearchResults
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.model.TrackDetails
 import com.spotkofi.app.data.model.TrackLyrics
+import com.spotkofi.app.data.local.AppSettings
 import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.remote.ItunesApi
 import com.spotkofi.app.data.remote.ItunesMapper
+import com.spotkofi.app.data.remote.ChartRegions
 import com.spotkofi.app.data.remote.LyricsApi
 import com.spotkofi.app.data.remote.SpotifyApi
 import com.spotkofi.app.data.remote.SpotifyEnrichment
 import com.spotkofi.app.data.remote.SpotifyTrack
+import com.spotkofi.app.data.remote.YouTubeIds
+import com.spotkofi.app.data.remote.YouTubeMusicBrowseClient
 import com.spotkofi.app.data.remote.YouTubeMusicHomeClient
 import com.spotkofi.app.data.remote.YouTubeMusicSearchClient
+import com.spotkofi.app.data.remote.YouTubeSongInfoClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -46,11 +54,22 @@ class ItunesMusicRepository internal constructor(
     private val itunes: ItunesApi,
     private val spotify: SpotifyApi,
     private val localStore: LocalMusicStore? = null,
+    /**
+     * Read per request rather than captured once, so changing the content region or
+     * the explicit filter in Settings applies to the next search instead of the
+     * next launch.
+     */
+    private val settingsProvider: () -> AppSettings = { AppSettings() },
 ) : MusicRepository {
 
     constructor() : this(ItunesApi(), SpotifyApi(), null)
 
     constructor(localStore: LocalMusicStore) : this(ItunesApi(), SpotifyApi(), localStore)
+
+    constructor(
+        localStore: LocalMusicStore,
+        settingsProvider: () -> AppSettings,
+    ) : this(ItunesApi(), SpotifyApi(), localStore, settingsProvider)
 
     private val searchCache = mutableMapOf<String, SearchResults>()
     private val tracksCache = mutableMapOf<String, List<Track>>()
@@ -60,7 +79,10 @@ class ItunesMusicRepository internal constructor(
     private val visited = MutableStateFlow<List<MediaCollection>>(emptyList())
     private val youtubeSearchClient = YouTubeMusicSearchClient()
     private val youtubeHomeClient = YouTubeMusicHomeClient()
+    private val youtubeBrowseClient = YouTubeMusicBrowseClient()
     private val lyricsApi = LyricsApi()
+    private val songInfoClient = YouTubeSongInfoClient()
+    private val moodGroupsCache = MutableStateFlow<List<MoodGroup>>(emptyList())
 
     override fun currentUserName(): String = "kofi_listener"
 
@@ -158,19 +180,61 @@ class ItunesMusicRepository internal constructor(
 
     override fun browseCategories(): List<BrowseCategory> = BrowseGenres
 
+    /**
+     * Search across songs, artists, albums and playlists.
+     *
+     * A single letter is not a query. It used to be treated as one, and because
+     * the provider answers anything with something, the results list filled with
+     * unrelated rows before the user had finished typing a word.
+     *
+     * Artists and albums now come from the same provider as the songs. They were
+     * previously borrowed from the metadata catalog, which is how a search could
+     * list an artist that had nothing to do with the tracks above it - and could
+     * not be opened, because that id pointed at a different service.
+     */
     override suspend fun search(query: String): SearchResults = coroutineScope {
         val term = query.trim()
-        if (term.isEmpty()) return@coroutineScope SearchResults()
+        if (term.length < MIN_SEARCH_LENGTH) return@coroutineScope SearchResults()
 
         val key = term.lowercase()
         searchCache[key]?.let { return@coroutineScope it }
 
+        val region = settingsProvider().contentRegion
         val tracks = async { cachedTracks(term, limit = 25) }
-        val albums = async { cachedAlbums(term, limit = 12) }
-        val artists = async { cachedArtists(term, limit = 12) }
+        val artists = async {
+            runCatalog { youtubeSearchClient.searchArtists(term, country = region) }.orEmpty()
+        }
+        val albums = async {
+            runCatalog { youtubeSearchClient.searchAlbums(term, country = region) }.orEmpty()
+        }
+        val playlists = async {
+            runCatalog { youtubeSearchClient.searchPlaylists(term, country = region) }.orEmpty()
+        }
+
+        val providerArtists = artists.await()
+        val providerAlbums = albums.await()
+
+        // The metadata catalog is only reached for a type the provider returned
+        // nothing for, so a working provider result is never diluted by a second
+        // source with different ids.
+        val fallbackArtists = if (providerArtists.isEmpty()) {
+            runCatalog { cachedArtists(term, limit = 12) }.orEmpty()
+        } else {
+            emptyList()
+        }
+        val fallbackAlbums = if (providerAlbums.isEmpty()) {
+            runCatalog { cachedAlbums(term, limit = 12) }.orEmpty()
+        } else {
+            emptyList()
+        }
+
         val result = SearchResults(
-            tracks = tracks.await(),
-            collections = (albums.await() + artists.await())
+            tracks = tracks.await().filterExplicit(),
+            collections = (
+                providerArtists + fallbackArtists +
+                    providerAlbums + fallbackAlbums +
+                    playlists.await()
+                )
                 .distinctBy { it.id }
                 .also(::remember),
         )
@@ -182,6 +246,48 @@ class ItunesMusicRepository internal constructor(
     override suspend fun exploreVideos(): List<ExploreItem> = emptyList()
     override suspend fun explorePodcasts(): List<ExploreItem> = emptyList()
 
+    // -------------------------------------------------------------- explore
+
+    override fun chartRegions(): List<ChartRegion> = ChartRegions.all
+
+    override suspend fun chart(regionCode: String): MusicChart? =
+        runCatalog { youtubeBrowseClient.chart(regionCode) }
+            ?.also { chart ->
+                remember(chart.topArtists)
+                chart.shelves.forEach { shelf -> remember(shelf.items) }
+            }
+
+    override suspend fun moodsAndGenres(): List<MoodGroup> {
+        // The grid is stable for a session and costs a full browse, so the first
+        // successful answer is reused rather than refetched every time the screen
+        // is opened.
+        moodGroupsCache.value.takeIf { it.isNotEmpty() }?.let { return it }
+        val groups = runCatalog { youtubeBrowseClient.moodsAndGenres() }.orEmpty()
+        if (groups.isNotEmpty()) moodGroupsCache.value = groups
+        return groups
+    }
+
+    override suspend fun moodCategory(category: MoodCategory): MoodCategoryContents? =
+        runCatalog { youtubeBrowseClient.moodCategory(category.params) }
+            ?.let { page ->
+                remember(page.playlists)
+                MoodCategoryContents(
+                    // The provider's own heading is preferred; the tile's label is
+                    // the fallback when the page returns none.
+                    title = page.title.ifBlank { category.title },
+                    songs = page.songs,
+                    playlists = page.playlists,
+                )
+            }
+
+    override suspend fun newReleases(): List<MediaCollection> =
+        runCatalog { youtubeBrowseClient.newReleases() }.orEmpty().also(::remember)
+
+    override suspend fun trendingPlaylists(regionCode: String): List<MediaCollection> =
+        runCatalog { youtubeBrowseClient.trendingPlaylists(regionCode) }
+            .orEmpty()
+            .also(::remember)
+
     // --------------------------------------------------------------- detail
 
     override suspend fun collection(id: String): MediaCollection? {
@@ -189,6 +295,14 @@ class ItunesMusicRepository internal constructor(
             return localStore?.playlist(id)
         }
         collectionsById[id]?.let { return it }
+
+        // Provider-sourced ids resolve against the provider. Without this branch a
+        // search hit or a chart card opened onto an empty screen, because the id
+        // was being parsed as a metadata-catalog id and never matched.
+        if (YouTubeIds.isYouTube(id)) {
+            return runCatalog { youtubeBrowseClient.collection(id) }
+                ?.also { collectionsById[id] = it }
+        }
 
         val resolved = when {
             id.startsWith(ItunesMapper.ALBUM_PREFIX) -> {
@@ -223,6 +337,14 @@ class ItunesMusicRepository internal constructor(
         }
         tracksByCollection[collectionId]?.let { return it }
 
+        if (YouTubeIds.isYouTube(collectionId)) {
+            val provided = runCatalog {
+                youtubeBrowseClient.collectionTracks(collectionId)
+            }.orEmpty()
+            if (provided.isNotEmpty()) tracksByCollection[collectionId] = provided
+            return provided
+        }
+
         val rawId = when {
             collectionId.startsWith(ItunesMapper.ALBUM_PREFIX) ->
                 ItunesMapper.rawId(collectionId, ItunesMapper.ALBUM_PREFIX)
@@ -253,7 +375,9 @@ class ItunesMusicRepository internal constructor(
         // Lyrics are a separate provider and the slowest of the four, so they are
         // fetched alongside the rest and allowed to fail on their own. A missing
         // lyric sheet must never cost the user the album and artist rows.
+        val lyricsEnabled = settingsProvider().lyricsEnabled
         val lyrics = async {
+            if (!lyricsEnabled) return@async null
             runCatalog {
                 lyricsApi.lyrics(
                     title = track.title,
@@ -262,6 +386,14 @@ class ItunesMusicRepository internal constructor(
                     durationMs = track.durationMs,
                 )
             }
+        }
+        // Publisher details for the credits panel. Its own request, allowed to fail
+        // on its own, and only attempted when the track has a provider id to ask
+        // about.
+        val credits = async {
+            track.videoId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { videoId -> runCatalog { songInfoClient.credits(videoId) } }
         }
         val spotifyEnrichment = async {
             runCatalog { spotify.enrich(track.title, track.artistName) }
@@ -286,6 +418,7 @@ class ItunesMusicRepository internal constructor(
                     instrumental = result.instrumental,
                 )
             },
+            credits = credits.await()?.takeIf { it.hasAny },
         )
     }
 
@@ -324,8 +457,10 @@ class ItunesMusicRepository internal constructor(
         }.orEmpty()
         if (candidates.isEmpty()) return emptyList()
 
-        // Match only for optional album/artist IDs and catalog artwork. Never
-        // replace the candidate title, performer, duration, or video identity.
+        // Match only to fill gaps: album/artist ids for navigation, and artwork or
+        // a duration the provider omitted. The provider's title, performer and
+        // video identity are never replaced, or a row would stop describing the
+        // audio it actually plays.
         val catalogTracks = runCatalog {
             ItunesMapper.toTracks(
                 itunes.search(
@@ -341,21 +476,16 @@ class ItunesMusicRepository internal constructor(
                 normalize(catalog.title) == normalize(candidate.title) &&
                     normalize(catalog.artistName) == normalize(candidate.artistName)
             }
-            Track(
-                id = "youtube:${candidate.videoId}",
-                title = candidate.title,
-                artistName = candidate.artistName,
+            candidate.copy(
+                // Left blank when neither source knows the album. A filler value
+                // such as the service's own name looked like real metadata.
                 albumTitle = candidate.albumTitle
-                    ?.takeIf { it.isNotBlank() }
-                    ?: catalogMatch?.albumTitle?.takeIf { it.isNotBlank() }
-                    ?: "YouTube Music",
+                    .ifBlank { catalogMatch?.albumTitle.orEmpty() },
                 durationMs = candidate.durationMs.takeIf { it > 0L }
-                    ?: catalogMatch?.durationMs?.takeIf { it > 0L }
+                    ?: catalogMatch?.durationMs
                     ?: 0L,
                 isExplicit = candidate.isExplicit || catalogMatch?.isExplicit == true,
                 artworkUrl = candidate.artworkUrl ?: catalogMatch?.artworkUrl,
-                externalUrl = "https://music.youtube.com/watch?v=${candidate.videoId}",
-                videoId = candidate.videoId,
                 albumId = catalogMatch?.albumId,
                 artistId = catalogMatch?.artistId,
             )
@@ -438,6 +568,15 @@ class ItunesMusicRepository internal constructor(
         .replace(Regex("[^a-z0-9]+"), " ")
         .trim()
 
+    /**
+     * Drops explicit tracks when the user asked for them to be hidden.
+     *
+     * Filtered at the repository rather than in each screen: a track that should be
+     * hidden must not reach a list, a queue or a download in the first place.
+     */
+    private fun List<Track>.filterExplicit(): List<Track> =
+        if (settingsProvider().hideExplicitContent) filterNot { it.isExplicit } else this
+
     private fun remember(items: List<MediaCollection>) {
         items.forEach { collectionsById[it.id] = it }
     }
@@ -454,6 +593,15 @@ class ItunesMusicRepository internal constructor(
         const val MAX_VISITED = 40
         const val TRACK_LIMIT = 50
         const val RECOMMENDATION_LIMIT = 8
+
+        /**
+         * Shortest query worth sending.
+         *
+         * One character matches almost everything, so the provider answers with a
+         * broad, unrelated list. Waiting for a second character costs nothing and
+         * is the difference between suggestions and noise.
+         */
+        const val MIN_SEARCH_LENGTH = 2
 
         /** Rows per song shelf on Home. Long shelves push the albums off-screen. */
         const val SONG_SHELF_LIMIT = 6

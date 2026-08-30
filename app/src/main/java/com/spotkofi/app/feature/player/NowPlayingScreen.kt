@@ -95,8 +95,10 @@ import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.AboutTrackCard
 import com.spotkofi.app.ui.components.LyricsCard
+import com.spotkofi.app.ui.components.LyricsSheet
 import com.spotkofi.app.ui.components.QueueSheet
 import com.spotkofi.app.ui.components.SavedToggle
+import com.spotkofi.app.ui.components.TrackCreditsSheet
 import com.spotkofi.app.ui.components.TrackOptionsSheet
 import com.spotkofi.app.ui.components.artworkSeedColor
 import com.spotkofi.app.ui.motion.clickableScale
@@ -217,6 +219,8 @@ private fun NowPlayingContent(
 
     var showOptions by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
+    var showLyrics by remember { mutableStateOf(false) }
+    var showCredits by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // Hand-off intents are built here rather than in the sheet so the sheet stays
     // a dumb list of rows and can be previewed without a real Context.
@@ -323,14 +327,23 @@ private fun NowPlayingContent(
                 details.lyrics?.takeIf { it.hasText || it.instrumental }?.let { lyrics ->
                     item(key = "lyrics") {
                         SectionSpacing {
-                            LyricsCard(lyrics = lyrics, positionMs = state.positionMs)
+                            LyricsCard(
+                                lyrics = lyrics,
+                                positionMs = state.positionMs,
+                                onExpand = { showLyrics = true },
+                            )
                         }
                     }
                 }
 
                 item(key = "about") {
                     SectionSpacing {
-                        AboutTrackCard(track = track, genre = details.artistGenre)
+                        AboutTrackCard(
+                            track = track,
+                            genre = details.artistGenre,
+                            credits = details.credits,
+                            onExpand = { showCredits = true },
+                        )
                     }
                 }
 
@@ -418,6 +431,30 @@ private fun NowPlayingContent(
             onDownload = onDownload,
             downloadStatus = downloadStatus,
             downloadProgress = downloadProgress,
+        )
+        TrackCreditsSheet(
+            visible = showCredits,
+            track = track,
+            credits = details?.credits,
+            genre = details?.artistGenre,
+            onDismiss = { showCredits = false },
+        )
+        // Above every sheet: the reader is a whole screen, not a panel over the
+        // player, so nothing else should paint on top of it.
+        LyricsSheet(
+            visible = showLyrics,
+            track = track,
+            lyrics = details?.lyrics,
+            positionMs = state.positionMs,
+            onDismiss = { showLyrics = false },
+            onSeekTo = { targetMs ->
+                // The transport speaks in fractions, so a lyric timestamp is
+                // converted here rather than widening the player's own contract.
+                val duration = state.effectiveDurationMs
+                if (duration > 0L) {
+                    onSeek((targetMs.toFloat() / duration.toFloat()).coerceIn(0f, 1f))
+                }
+            },
         )
         QueueSheet(
             visible = showQueue,
