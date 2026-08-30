@@ -22,6 +22,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GridView
@@ -33,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -102,7 +105,6 @@ fun LibraryScreen(
     onCollectionClick: (String) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
     onOpenProfile: () -> Unit,
-    onSearchClick: () -> Unit,
     onCreate: () -> Unit,
     contentPadding: PaddingValues,
 ) {
@@ -124,6 +126,8 @@ fun LibraryScreen(
     var filter by remember { mutableStateOf(LibraryFilter.All) }
     var gridLayout by remember { mutableStateOf(true) }
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
+    var showLibrarySearch by remember { mutableStateOf(false) }
+    var libraryQuery by remember { mutableStateOf("") }
 
     val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
 
@@ -137,6 +141,9 @@ fun LibraryScreen(
                     item.filePath?.let { path -> java.io.File(path).isFile } == true
             }
             .map { it.track }
+    }
+    val searchableTracks = remember(savedTracks, history, downloadedTracks) {
+        (savedTracks + history + downloadedTracks).distinctBy { it.id }
     }
 
     val allCollections = remember(playlists, savedCollections, visited) {
@@ -173,15 +180,16 @@ fun LibraryScreen(
                 .fillMaxSize()
                 .background(SpotKofiTheme.colors.base),
         ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = contentPadding,
-            ) {
+            if (!showLibrarySearch) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = contentPadding,
+                ) {
                 item(key = "header") {
                     LibraryHeader(
                         userName = userName,
                         onOpenProfile = onOpenProfile,
-                        onSearchClick = onSearchClick,
+                        onSearchClick = { showLibrarySearch = true },
                         onCreate = onCreate,
                     )
                 }
@@ -337,6 +345,22 @@ fun LibraryScreen(
                 }
 
                 item(key = "footer") { AppFooter() }
+                }
+            } else {
+                LibrarySearchContent(
+                    query = libraryQuery,
+                    onQueryChange = { libraryQuery = it },
+                    onClose = {
+                        showLibrarySearch = false
+                        libraryQuery = ""
+                    },
+                    collections = allCollections,
+                    tracks = searchableTracks,
+                    onCollectionClick = onCollectionClick,
+                    onTrackClick = onTrackClick,
+                    onTrackMore = { selectedTrack = it },
+                    contentPadding = contentPadding,
+                )
             }
 
             val track = selectedTrack
@@ -368,6 +392,145 @@ fun LibraryScreen(
                     }
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun LibrarySearchContent(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    collections: List<MediaCollection>,
+    tracks: List<Track>,
+    onCollectionClick: (String) -> Unit,
+    onTrackClick: (Track, List<Track>) -> Unit,
+    onTrackMore: (Track) -> Unit,
+    contentPadding: PaddingValues,
+) {
+    val colors = SpotKofiTheme.colors
+    val dimens = SpotKofiTheme.dimens
+    val term = query.trim().lowercase()
+    val matchingCollections = remember(term, collections) {
+        if (term.length < 2) emptyList() else collections.filter { collection ->
+            collection.title.lowercase().contains(term) ||
+                collection.subtitle.lowercase().contains(term)
+        }
+    }
+    val matchingTracks = remember(term, tracks) {
+        if (term.length < 2) emptyList() else tracks.filter { track ->
+            track.title.lowercase().contains(term) ||
+                track.artistName.lowercase().contains(term) ||
+                track.albumTitle.lowercase().contains(term)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = dimens.screenGutter, vertical = dimens.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(
+                    imageVector = Icons.Filled.ArrowBack,
+                    contentDescription = "Close library search",
+                    tint = colors.textPrimary,
+                )
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                placeholder = { Text("Search your library") },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Clear library search",
+                            )
+                        }
+                    }
+                },
+            )
+        }
+
+        if (term.length < 2) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Search saved songs, playlists, albums, and artists",
+                    color = colors.textSecondary,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = dimens.spaceHuge),
+            ) {
+                if (matchingCollections.isEmpty() && matchingTracks.isEmpty()) {
+                    item(key = "library_search_empty") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(dimens.spaceHuge),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("Nothing in your library matches \"$query\"", color = colors.textSecondary)
+                        }
+                    }
+                }
+                if (matchingCollections.isNotEmpty()) {
+                    item(key = "library_search_collections_heading") {
+                        Text(
+                            text = "Collections",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary,
+                            modifier = Modifier.padding(
+                                horizontal = dimens.screenGutter,
+                                vertical = dimens.spaceMd,
+                            ),
+                        )
+                    }
+                    items(matchingCollections, key = { "library_search_collection_${it.id}" }) { collection ->
+                        LibraryListItem(
+                            collection = collection,
+                            onClick = { onCollectionClick(collection.id) },
+                        )
+                    }
+                }
+                if (matchingTracks.isNotEmpty()) {
+                    item(key = "library_search_tracks_heading") {
+                        Text(
+                            text = "Songs",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textPrimary,
+                            modifier = Modifier.padding(
+                                horizontal = dimens.screenGutter,
+                                vertical = dimens.spaceMd,
+                            ),
+                        )
+                    }
+                    items(matchingTracks, key = { "library_search_track_${it.id}" }) { track ->
+                        TrackRow(
+                            track = track,
+                            onClick = { onTrackClick(track, matchingTracks) },
+                            onMoreClick = { onTrackMore(track) },
+                        )
+                    }
+                }
+            }
         }
     }
 }

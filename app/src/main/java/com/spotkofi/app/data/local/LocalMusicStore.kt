@@ -250,6 +250,18 @@ class LocalMusicStore(context: Context) {
         val db = helper.writableDatabase
         db.beginTransaction()
         try {
+            val alreadyPresent = db.query(
+                TABLE_PLAYLIST_TRACKS,
+                arrayOf("track_id"),
+                "playlist_id = ? AND track_id = ?",
+                arrayOf(playlistId, track.id),
+                null,
+                null,
+                null,
+                "1",
+            ).use { cursor -> cursor.moveToFirst() }
+            if (alreadyPresent) return@withContext
+
             upsertTrack(db, track)
             val nextPosition = db.rawQuery(
                 "SELECT COALESCE(MAX(position), -1) + 1 FROM $TABLE_PLAYLIST_TRACKS WHERE playlist_id = ?",
@@ -257,7 +269,7 @@ class LocalMusicStore(context: Context) {
             ).use { cursor ->
                 if (cursor.moveToFirst()) cursor.getInt(0) else 0
             }
-            db.insertWithOnConflict(
+            db.insert(
                 TABLE_PLAYLIST_TRACKS,
                 null,
                 ContentValues().apply {
@@ -265,7 +277,6 @@ class LocalMusicStore(context: Context) {
                     put("track_id", track.id)
                     put("position", nextPosition)
                 },
-                SQLiteDatabase.CONFLICT_IGNORE,
             )
             db.setTransactionSuccessful()
         } finally {

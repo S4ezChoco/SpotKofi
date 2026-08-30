@@ -51,6 +51,7 @@ class AppContainer(
         context = context,
         musicService = musicService,
         localStore = localStore,
+        musicRepository = musicRepository,
         dataSourceFactory = playbackCache.dataSourceFactory,
         settingsProvider = { settingsStore.current },
     )

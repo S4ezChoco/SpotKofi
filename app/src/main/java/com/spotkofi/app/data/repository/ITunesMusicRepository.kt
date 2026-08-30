@@ -82,9 +82,20 @@ class ItunesMusicRepository internal constructor(
     private val youtubeBrowseClient = YouTubeMusicBrowseClient()
     private val lyricsApi = LyricsApi()
     private val songInfoClient = YouTubeSongInfoClient()
+    private val metadataTrackResolver = com.spotkofi.app.data.remote.YouTubeTrackResolver()
     private val moodGroupsCache = MutableStateFlow<List<MoodGroup>>(emptyList())
 
     override fun currentUserName(): String = "kofi_listener"
+
+    override fun invalidateHomeCache() {
+        // Pull-to-refresh is an explicit request for new shelves, not merely a
+        // recomposition. Clear only short-lived remote caches; local library and
+        // playback state remain durable and untouched.
+        searchCache.clear()
+        tracksCache.clear()
+        albumsCache.clear()
+        moodGroupsCache.value = emptyList()
+    }
 
     // ---------------------------------------------------------------- feeds
 
@@ -364,6 +375,19 @@ class ItunesMusicRepository internal constructor(
     }
 
     override suspend fun trackDetails(track: Track): TrackDetails = coroutineScope {
+        val settings = settingsProvider()
+        val region = settings.contentRegion
+        // Catalog rows do not carry a YouTube id. Resolve one once and share it
+        // between credits and lyrics so the detail page describes the recording
+        // that playback will use instead of silently giving up on provider data.
+        val resolvedVideoId = async {
+            track.videoId
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: runCatalog {
+                    metadataTrackResolver.resolveVideoId(track, country = region)
+                }
+        }
         val albumTracks = async {
             track.albumId?.let { runCatalog { tracks(it) } }.orEmpty()
         }
@@ -378,28 +402,26 @@ class ItunesMusicRepository internal constructor(
         // Lyrics are a separate provider and the slowest of the four, so they are
         // fetched alongside the rest and allowed to fail on their own. A missing
         // lyric sheet must never cost the user the album and artist rows.
-        val lyricsEnabled = settingsProvider().lyricsEnabled
-        val lyricsProvider = settingsProvider().lyricsProvider
         val lyrics = async {
-            if (!lyricsEnabled) return@async null
+            if (!settings.lyricsEnabled) return@async null
             runCatalog {
                 lyricsApi.lyrics(
                     title = track.title,
                     artistName = track.artistName,
                     albumTitle = track.albumTitle,
                     durationMs = track.durationMs,
-                    videoId = track.videoId,
-                    provider = lyricsProvider,
+                    videoId = resolvedVideoId.await(),
+                    provider = settings.lyricsProvider,
                 )
             }
         }
         // Publisher details for the credits panel. Its own request, allowed to fail
         // on its own, and only attempted when the track has a provider id to ask
-        // about.
+        // about. The player context uses the selected region, just like search.
         val credits = async {
-            track.videoId
-                ?.takeIf { it.isNotBlank() }
-                ?.let { videoId -> runCatalog { songInfoClient.credits(videoId) } }
+            resolvedVideoId.await()?.let { videoId ->
+                runCatalog { songInfoClient.credits(videoId, country = region) }
+            }
         }
         val spotifyEnrichment = async {
             runCatalog { spotify.enrich(track.title, track.artistName) }
@@ -460,8 +482,9 @@ class ItunesMusicRepository internal constructor(
     }
 
     private suspend fun searchYouTubeTracks(term: String, limit: Int): List<Track> {
+        val region = settingsProvider().contentRegion
         val candidates = runCatalog {
-            youtubeSearchClient.searchSongs(term, limit)
+            youtubeSearchClient.searchSongs(term, limit, country = region)
         }.orEmpty()
         if (candidates.isEmpty()) return emptyList()
 

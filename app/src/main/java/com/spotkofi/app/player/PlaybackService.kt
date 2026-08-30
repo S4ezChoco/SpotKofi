@@ -101,11 +101,7 @@ class PlaybackService : Service() {
             ACTION_TOGGLE_PLAY -> playerController.togglePlayPause()
             ACTION_NEXT -> playerController.next()
             ACTION_PREVIOUS -> playerController.previous()
-            ACTION_STOP -> {
-                playerController.stop()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
+            ACTION_STOP -> shutdownPlaybackService()
         }
         return START_NOT_STICKY
     }
@@ -113,24 +109,34 @@ class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Swiping the app away while paused should not leave a dead notification
-        // behind; while playing, audio deliberately continues.
-        if (!playerController.state.value.isPlaying) {
-            playerController.stop()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-        }
+        // Recents removal is an explicit app-exit action for SpotKofi. Do not leave
+        // an orphaned foreground service or media notification behind the launcher.
+        shutdownPlaybackService()
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         artworkJob?.cancel()
         serviceScope.cancel()
+        removeNotification()
         // Releases only the session. The player itself is owned by AppContainer and
         // must survive this service being torn down and started again.
         session?.release()
         session = null
         super.onDestroy()
+    }
+
+    private fun shutdownPlaybackService() {
+        runCatching { playerController.stop() }
+        removeNotification()
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        stopSelf()
+    }
+
+    private fun removeNotification() {
+        runCatching {
+            getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        }
     }
 
     private suspend fun loadArtwork(url: String?) {

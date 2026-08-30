@@ -47,6 +47,9 @@ interface MusicRepository {
     /** Home content for [tab]. */
     suspend fun homeSections(tab: HomeTab): List<HomeSection>
 
+    /** Clears short-lived remote feed caches before an explicit user refresh. */
+    fun invalidateHomeCache() {}
+
     /**
      * What the user has opened, most recent first.
      *

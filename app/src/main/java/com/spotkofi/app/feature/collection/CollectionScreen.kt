@@ -33,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +93,14 @@ fun CollectionScreen(
     val downloads by container.downloadManager.downloads.collectAsStateWithLifecycle()
     val savedCollections by container.localStore.savedCollections.collectAsStateWithLifecycle()
     val playlists by container.localStore.playlists.collectAsStateWithLifecycle()
+    LaunchedEffect(playlists) {
+        // Local playlist membership is stored in a relation table. Re-read the
+        // open detail whenever that playlist list changes so an add from another
+        // screen updates this screen without navigating away and back.
+        if (collectionId.startsWith("local:playlist:") && state.collection != null) {
+            viewModel.retry()
+        }
+    }
     val scope = rememberCoroutineScope()
     var selectedTrack by remember { mutableStateOf<Track?>(null) }
     val downloadsByTrack = remember(downloads) { downloads.associateBy { it.track.id } }
@@ -147,7 +156,10 @@ fun CollectionScreen(
             onDownload = { track?.let(container.downloadManager::toggleDownload) },
             onAddToPlaylist = { playlist ->
                 track?.let { candidate ->
-                    scope.launch { container.localStore.addToPlaylist(playlist.id, candidate) }
+                    scope.launch {
+                        container.localStore.addToPlaylist(playlist.id, candidate)
+                        if (collectionId.startsWith("local:playlist:")) viewModel.retry()
+                    }
                 }
             },
         )

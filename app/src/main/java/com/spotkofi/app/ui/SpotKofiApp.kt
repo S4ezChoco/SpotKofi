@@ -158,21 +158,21 @@ fun SpotKofiApp(
                         initialValue = playerPos.floatValue,
                         targetValue = if (open) 0f else 1f,
                         // Velocity arrives in px/s but the value is a 0..1 fraction.
+                        // The player spring is shared by opening, closing and an
+                        // interrupted drag, so reversing direction never snaps.
                         initialVelocity = velocityPxPerSec / playerHeightPx.floatValue,
-                        animationSpec = if (open) Motion.gentle() else Motion.snappy(),
+                        animationSpec = Motion.player(),
                     ) { value, _ -> playerPos.floatValue = value }
                     if (!open) playerMounted = false
                 }
             }
 
             fun openPlayer() {
-                settleJob.value?.cancel()
-                // Make the video surface visible immediately. The old path only
-                // started an animation from the dismissed position; in practice
-                // the WebView could keep playing behind the mini-player while the
-                // full surface remained offscreen.
+                // Mount at the dismissed position, then animate into place. The
+                // previous implementation assigned 0f immediately, which made a
+                // tap or upward mini-player swipe feel like a hard teleport.
                 playerMounted = true
-                playerPos.floatValue = 0f
+                settlePlayer(open = true)
             }
 
             // Keyed on the play-request counter, NOT on the track id.
@@ -391,9 +391,6 @@ fun SpotKofiApp(
                                             container.playerController.play(track, queue)
                                         },
                                         onOpenProfile = drawerState::open,
-                                        onSearchClick = {
-                                            navController.switchTab(TopLevelDestination.Search)
-                                        },
                                         onCreate = { showPlaylistDialog = true },
                                         contentPadding = screenPadding,
                                     )
@@ -433,9 +430,9 @@ fun SpotKofiApp(
                         // ---- Mini player: above content, below the Create scrim ----
                         AnimatedVisibility(
                             visible = !isSettings,
-                            enter = slideInVertically(Motion.gentle()) { it } +
+                            enter = slideInVertically(Motion.player()) { it } +
                                 fadeIn(Motion.fast()),
-                            exit = slideOutVertically(Motion.snappy()) { it } +
+                            exit = slideOutVertically(Motion.player()) { it } +
                                 fadeOut(Motion.fast()),
                             modifier = Modifier.align(Alignment.BottomCenter),
                         ) {

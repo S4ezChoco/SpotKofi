@@ -26,42 +26,43 @@ internal class YouTubeSongInfoClient(
     private val client: OkHttpClient = Innertube.defaultClient(),
 ) {
 
-    suspend fun credits(videoId: String): TrackCredits? = withContext(Dispatchers.IO) {
-        if (videoId.isBlank()) return@withContext null
+    suspend fun credits(videoId: String, country: String = "US"): TrackCredits? =
+        withContext(Dispatchers.IO) {
+            if (videoId.isBlank()) return@withContext null
 
-        val response = Innertube.post(client, PLAYER_ENDPOINT, playerBody(videoId))
-            ?: return@withContext null
-        val root = parseRoot(response) ?: return@withContext null
+            val response = Innertube.post(client, PLAYER_ENDPOINT, playerBody(videoId, country))
+                ?: return@withContext null
+            val root = parseRoot(response) ?: return@withContext null
 
-        val details = root.walkObjects()
-            .firstOrNull { it.containsKey("videoDetails") }
-            ?.get("videoDetails") as? JsonObject
+            val details = root.walkObjects()
+                .firstOrNull { it.containsKey("videoDetails") }
+                ?.get("videoDetails") as? JsonObject
 
-        val microformat = root.walkObjects()
-            .mapNotNull { it["playerMicroformatRenderer"] as? JsonObject }
-            .firstOrNull()
+            val microformat = root.walkObjects()
+                .mapNotNull { it["playerMicroformatRenderer"] as? JsonObject }
+                .firstOrNull()
 
-        val channel = details?.string("author")?.trim()?.takeIf { it.isNotEmpty() }
-        val plays = details?.string("viewCount")?.trim()?.toLongOrNull()
-        val description = details?.string("shortDescription")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-        val published = microformat?.string("publishDate")
-            ?: microformat?.string("uploadDate")
+            val channel = details?.string("author")?.trim()?.takeIf { it.isNotEmpty() }
+            val plays = details?.string("viewCount")?.trim()?.toLongOrNull()
+            val description = details?.string("shortDescription")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+            val published = microformat?.string("publishDate")
+                ?: microformat?.string("uploadDate")
 
-        // Nothing usable came back; the caller shows what it already knew instead of
-        // an empty panel.
-        if (channel == null && plays == null && description == null && published == null) {
-            return@withContext null
+            // Nothing usable came back; the caller shows what it already knew instead of
+            // an empty panel.
+            if (channel == null && plays == null && description == null && published == null) {
+                return@withContext null
+            }
+
+            TrackCredits(
+                channelName = channel,
+                plays = plays,
+                publishedOn = published?.take(10),
+                description = description,
+            )
         }
-
-        TrackCredits(
-            channelName = channel,
-            plays = plays,
-            publishedOn = published?.take(10),
-            description = description,
-        )
-    }
 
     /**
      * Fetches the first usable YouTube caption track. The raw transcript is kept
@@ -123,8 +124,8 @@ internal class YouTubeSongInfoClient(
         Innertube.json.parseToJsonElement(response) as? JsonObject
     }.getOrNull()
 
-    private fun playerBody(videoId: String): String = buildJsonObject {
-        put("context", Innertube.json.parseToJsonElement(CONTEXT_BODY))
+    private fun playerBody(videoId: String, country: String = "US"): String = buildJsonObject {
+        put("context", playerContext(country))
         put("videoId", JsonPrimitive(videoId))
         // Without these the endpoint refuses age-gated and region-flagged items
         // outright, and both metadata and captions disappear for those songs.
@@ -132,23 +133,26 @@ internal class YouTubeSongInfoClient(
         put("racyCheckOk", JsonPrimitive(true))
     }.toString()
 
+    private fun playerContext(country: String): JsonObject = buildJsonObject {
+        put(
+            "client",
+            buildJsonObject {
+                put("clientName", JsonPrimitive("ANDROID_MUSIC"))
+                put("clientVersion", JsonPrimitive("6.33.52"))
+                put("androidSdkVersion", JsonPrimitive(30))
+                put("hl", JsonPrimitive("en"))
+                put("gl", JsonPrimitive(normalizeCountry(country)))
+            },
+        )
+    }
+
+    private fun normalizeCountry(country: String): String = country
+        .trim()
+        .uppercase()
+        .take(2)
+        .ifBlank { "US" }
+
     private companion object {
         const val PLAYER_ENDPOINT = "https://music.youtube.com/youtubei/v1/player"
-
-        /**
-         * The player endpoint wants an Android-style client for a bare metadata
-         * read; the web client answers with a challenge for the same request.
-         */
-        val CONTEXT_BODY = """
-            {
-              "client": {
-                "clientName": "ANDROID_MUSIC",
-                "clientVersion": "6.33.52",
-                "androidSdkVersion": 30,
-                "hl": "en",
-                "gl": "US"
-              }
-            }
-        """.trimIndent()
     }
 }

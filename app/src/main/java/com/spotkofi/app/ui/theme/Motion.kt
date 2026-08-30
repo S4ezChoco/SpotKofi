@@ -52,6 +52,12 @@ object Motion {
     /** Slow and heavy. Large surfaces such as sheets and drawers. */
     fun <T> gentle(): SpringSpec<T> = spring(dampingRatio = 0.9f, stiffness = 170f)
 
+    /**
+     * A broad, critically damped surface spring for player and mini-player motion.
+     * It keeps drag velocity when interrupted without the hard snap of [snappy].
+     */
+    fun <T> player(): SpringSpec<T> = spring(dampingRatio = 0.92f, stiffness = 260f)
+
     // ---- Tweens ----
     fun <T> fast(): FiniteAnimationSpec<T> = tween(Fast, easing = Standard)
     fun <T> medium(): FiniteAnimationSpec<T> = tween(Medium, easing = Emphasized)

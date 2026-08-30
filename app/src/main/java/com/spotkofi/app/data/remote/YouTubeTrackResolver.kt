@@ -9,9 +9,9 @@ import kotlinx.coroutines.CancellationException
  *
  * Search results already arrive with their own video ID, but album, artist and
  * recommendation rows come from the iTunes catalog, which has no notion of a
- * YouTube video. Resolving lazily here, at the moment a track is actually
- * played, is what lets those rows play full-length audio without paying for
- * fifty network lookups every time an album screen opens.
+ * YouTube video. Resolving lazily here, at the moment a track is actually played, is
+ * what lets those rows play full-length audio without paying for fifty network
+ * lookups every time an album screen opens.
  *
  * The match is scored rather than taken from the top hit: a bare title search
  * happily returns live versions, covers and reactions, and picking the first of
@@ -28,10 +28,11 @@ internal class YouTubeTrackResolver(
      * Returns [Track.videoId] when the track already carries one, otherwise the
      * best-matching YouTube video ID, or null when nothing matches well enough.
      */
-    suspend fun resolveVideoId(track: Track): String? {
+    suspend fun resolveVideoId(track: Track, country: String = "US"): String? {
         track.videoId?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
 
-        val key = cacheKey(track)
+        val normalizedCountry = normalizeCountry(country)
+        val key = cacheKey(track, normalizedCountry)
         cache[key]?.let { return it }
 
         val query = listOf(track.artistName, track.title)
@@ -41,7 +42,11 @@ internal class YouTubeTrackResolver(
         if (query.isEmpty()) return null
 
         val candidates = try {
-            searchClient.searchSongs(query, limit = CANDIDATE_LIMIT)
+            searchClient.searchSongs(
+                query,
+                limit = CANDIDATE_LIMIT,
+                country = normalizedCountry,
+            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -117,13 +122,19 @@ internal class YouTubeTrackResolver(
         }
     }
 
-    private fun cacheKey(track: Track): String =
-        normalize(track.artistName) + "|" + normalize(track.title)
+    private fun cacheKey(track: Track, country: String): String =
+        country + "|" + normalize(track.artistName) + "|" + normalize(track.title)
 
     private fun normalize(value: String): String = value
         .lowercase()
         .replace(Regex("[^a-z0-9]+"), " ")
         .trim()
+
+    private fun normalizeCountry(country: String): String = country
+        .trim()
+        .uppercase()
+        .take(2)
+        .ifBlank { "US" }
 
     private companion object {
         const val TAG = "SpotKofiResolver"

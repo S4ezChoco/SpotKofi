@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,6 +22,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.spotkofi.app.ui.theme.ArtworkSeeds
 import com.spotkofi.app.ui.theme.SpotKofiTheme
@@ -64,6 +66,7 @@ fun Artwork(
         url?.takeIf { it.isNotBlank() }?.let(::optimizedArtworkUrl)
     }
     var imageFailed by remember(displayUrl) { mutableStateOf(false) }
+    var imageLoading by remember(displayUrl) { mutableStateOf(displayUrl != null) }
 
     Box(
         modifier = modifier
@@ -76,9 +79,24 @@ fun Artwork(
                 model = displayUrl,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
-                onError = { imageFailed = true },
+                onLoading = { imageLoading = true },
+                onSuccess = {
+                    imageLoading = false
+                    imageFailed = false
+                },
+                onError = {
+                    imageLoading = false
+                    imageFailed = true
+                },
                 modifier = Modifier.fillMaxSize(),
             )
+            if (imageLoading) {
+                CircularProgressIndicator(
+                    color = Color.White.copy(alpha = 0.55f),
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         } else {
             Icon(
                 imageVector = Icons.Filled.MusicNote,

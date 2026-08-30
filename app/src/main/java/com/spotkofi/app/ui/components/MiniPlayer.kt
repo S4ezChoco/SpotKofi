@@ -44,12 +44,12 @@ import androidx.compose.ui.unit.dp
 import com.spotkofi.app.R
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlin.math.abs
 
 /** Upward drag distance, px, that expands into the full player. */
 private const val EXPAND_DISTANCE_PX = 36f
-private const val EXPAND_VELOCITY_PX = 700f
 private const val HORIZONTAL_SWIPE_DISTANCE_PX = 96f
 private const val DISMISS_DISTANCE_PX = 120f
 
@@ -102,16 +102,25 @@ fun MiniPlayer(
         label = "miniPlayerProgress",
     )
 
-    // One gesture surface handles all three directions without making a vertical
-    // drag look like a row click: up opens, down dismisses, left/right changes track.
+    // Keep the raw drag target separate from the drawn offset. Resetting the
+    // target on release lets Compose animate the card back with the same surface
+    // spring as the full player instead of snapping it to its old position.
     val dragPx = remember { mutableFloatStateOf(0f) }
+    val settledDragPx by animateFloatAsState(
+        targetValue = dragPx.floatValue,
+        animationSpec = Motion.player(),
+        label = "miniPlayerDrag",
+    )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = dimens.spaceSm)
             .graphicsLayer {
-                translationY = dragPx.floatValue.coerceAtLeast(0f) * 0.6f
+                // A downward gesture follows the finger at a softer rate, while
+                // an upward gesture still gives immediate feedback before the
+                // full-player surface animates over it.
+                translationY = settledDragPx * 0.6f
             }
             .clip(SpotKofiTheme.shapes.miniPlayer)
             .background(cardBrush)
@@ -128,6 +137,8 @@ fun MiniPlayer(
                     onDragEnd = {
                         val endedHorizontal = horizontal
                         val endedVertical = vertical
+                        // The animated value returns to rest after every gesture;
+                        // the host's player animation handles the next surface.
                         dragPx.floatValue = 0f
                         when {
                             abs(endedHorizontal) >= HORIZONTAL_SWIPE_DISTANCE_PX -> {
@@ -142,7 +153,7 @@ fun MiniPlayer(
                         change.consume()
                         horizontal += amount.x
                         vertical += amount.y
-                        dragPx.floatValue = vertical.coerceIn(-EXPAND_DISTANCE_PX * 2f, 240f)
+                        dragPx.floatValue = vertical.coerceIn(-180f, 240f)
                     },
                 )
             }

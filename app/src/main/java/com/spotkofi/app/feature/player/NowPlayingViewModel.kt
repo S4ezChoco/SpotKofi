@@ -41,7 +41,7 @@ class NowPlayingViewModel(
                 .map { it.track }
                 .distinctUntilChanged { old, new -> old?.id == new?.id }
             val lyricsConfig = settingsStore.settings
-                .map { it.lyricsEnabled to it.lyricsProvider }
+                .map { Triple(it.lyricsEnabled, it.lyricsProvider, it.contentRegion) }
                 .distinctUntilChanged()
             combine(trackFlow, lyricsConfig) { track, _ -> track }
                 .collect { track ->

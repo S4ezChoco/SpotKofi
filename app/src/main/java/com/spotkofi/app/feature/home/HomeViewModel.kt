@@ -123,7 +123,10 @@ class HomeViewModel(
     fun retry() = load()
 
     /** Pull-to-refresh reloads every Home shelf, including region-sensitive data. */
-    fun refresh() = load(refreshing = true)
+    fun refresh() {
+        repository.invalidateHomeCache()
+        load(refreshing = true)
+    }
 
     /** Loads the real Home feed and the provider discovery blocks together. */
     private fun load(
@@ -147,8 +150,14 @@ class HomeViewModel(
             }
             try {
                 supervisorScope {
-                    val picks = async { repository.quickPicks() }
-                    val sections = async { repository.homeSections(HomeTab.All) }
+                    val picks = async {
+                        runCatching { repository.quickPicks() }
+                            .getOrDefault(remoteQuickPicks)
+                    }
+                    val sections = async {
+                        runCatching { repository.homeSections(HomeTab.All) }
+                            .getOrDefault(remoteSections)
+                    }
                     val trending = async {
                         runCatching { repository.trendingPlaylists(region) }
                             .getOrDefault(emptyList())
@@ -298,13 +307,16 @@ class HomeViewModel(
         }
     }
 
-    /** Persists the region and reloads all Home content, not only the chart. */
+    /** Persists the region; the settings observer owns the single reload. */
     fun onRegionSelected(code: String) {
         val normalized = code.trim().uppercase().take(2)
         if (normalized.isBlank() || normalized == _uiState.value.regionCode) return
-        settingsStore?.setContentRegion(normalized)
-        _uiState.update { it.copy(regionCode = normalized) }
-        load(regionOverride = normalized)
+        if (settingsStore != null) {
+            settingsStore.setContentRegion(normalized)
+        } else {
+            _uiState.update { it.copy(regionCode = normalized) }
+            load(regionOverride = normalized)
+        }
     }
 
     private fun findCategory(filter: HomeFilter): MoodCategory? {

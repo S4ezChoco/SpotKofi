@@ -295,7 +295,6 @@ private fun NowPlayingContent(
                         onSwipeHorizontal = { delta ->
                             if (delta < 0f) playNextWithAnimation() else playPreviousWithAnimation()
                         },
-                        onMoreOptions = { showOptions = true },
                     )
                 }
             }
@@ -336,6 +335,7 @@ private fun NowPlayingContent(
                         canShare = track.isExternallyOpenable,
                         onShare = { shareTrack(track) },
                         onShowQueue = { showQueue = true },
+                        onShowOptions = { showOptions = true },
                     )
                     Spacer(Modifier.height(dimens.spaceXl))
                 }
@@ -506,16 +506,14 @@ private fun HeroArtwork(
     onDrag: (Float) -> Unit,
     onDragStopped: (Float) -> Unit,
     onSwipeHorizontal: (Float) -> Unit,
-    onMoreOptions: () -> Unit,
 ) {
     val dimens = SpotKofiTheme.dimens
 
-    Box(
+    // Keep the header in its own vertical band. The artwork starts below the
+    // back-button safe area instead of painting underneath that control.
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = dimens.spaceXl, vertical = dimens.spaceMd)
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(24.dp))
             .pointerInput(Unit) {
                 var horizontal = 0f
                 var vertical = 0f
@@ -543,55 +541,10 @@ private fun HeroArtwork(
                 )
             },
     ) {
-        AnimatedContent(
-            targetState = track,
-            transitionSpec = {
-                val direction = if (swipeDirection >= 0) 1 else -1
-                (
-                    slideInHorizontally(
-                        animationSpec = tween(Motion.Medium),
-                        initialOffsetX = { width -> direction * width },
-                    ) + fadeIn(tween(Motion.Fast))
-                ) togetherWith (
-                    slideOutHorizontally(
-                        animationSpec = tween(Motion.Medium),
-                        targetOffsetX = { width -> -direction * width },
-                    ) + fadeOut(tween(Motion.Fast))
-                )
-            },
-            label = "artworkSwipe",
-            modifier = Modifier.fillMaxSize(),
-        ) { animatedTrack ->
-            Artwork(
-                id = animatedTrack.id,
-                url = animatedTrack.artworkUrl,
-                shape = RoundedCornerShape(24.dp),
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
-        // Scrims: one under the top bar, one behind the lyric line, so both stay
-        // legible whatever the artwork is.
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = 0.45f),
-                        0.25f to Color.Transparent,
-                        0.7f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.55f),
-                    ),
-                ),
-        )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                // Keep the back/menu icons clear of the artwork edge and the
-                // status-bar cutout; the reference gives this row a visible top
-                // breathing space instead of pinning it to the first pixel.
                 .padding(top = dimens.spaceSm, start = dimens.spaceXs, end = dimens.spaceXs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -599,27 +552,72 @@ private fun HeroArtwork(
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowDown,
                     contentDescription = stringResource(R.string.cd_back),
-                    tint = Color.White,
+                    tint = SpotKofiTheme.colors.textPrimary,
                     modifier = Modifier.size(dimens.iconLg),
                 )
             }
             Text(
                 text = contextLabel,
                 style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
+                color = SpotKofiTheme.colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onMoreOptions) {
-                Icon(
-                    imageVector = Icons.Filled.MoreVert,
-                    contentDescription = stringResource(R.string.cd_more_options),
-                    tint = Color.White,
-                )
-            }
+            // Balance the back-button touch target without adding a second
+            // overflow action at the top of the player.
+            Spacer(Modifier.size(48.dp))
         }
 
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = dimens.spaceXl, vertical = dimens.spaceMd)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(24.dp)),
+        ) {
+            AnimatedContent(
+                targetState = track,
+                transitionSpec = {
+                    val direction = if (swipeDirection >= 0) 1 else -1
+                    (
+                        slideInHorizontally(
+                            animationSpec = tween(360, easing = Motion.Emphasized),
+                            initialOffsetX = { width -> direction * width },
+                        ) + fadeIn(tween(260, easing = Motion.Emphasized))
+                    ) togetherWith (
+                        slideOutHorizontally(
+                            animationSpec = tween(360, easing = Motion.Emphasized),
+                            targetOffsetX = { width -> -direction * width },
+                        ) + fadeOut(tween(220, easing = Motion.Standard))
+                    )
+                },
+                label = "artworkSwipe",
+                modifier = Modifier.fillMaxSize(),
+            ) { animatedTrack ->
+                Artwork(
+                    id = animatedTrack.id,
+                    url = animatedTrack.artworkUrl,
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            // The image keeps only readability scrims; the header is no longer
+            // painted over the artwork, so the top gradient does not hide the
+            // first row of pixels or make the back button look embedded in it.
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.18f),
+                            0.68f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.55f),
+                        ),
+                    ),
+            )
+        }
     }
 }
 
@@ -858,6 +856,7 @@ private fun SecondaryRow(
     canShare: Boolean,
     onShare: () -> Unit,
     onShowQueue: () -> Unit,
+    onShowOptions: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
@@ -897,6 +896,16 @@ private fun SecondaryRow(
                 )
             }
             Spacer(Modifier.width(dimens.spaceSm))
+        }
+        // Keep the overflow in the lower action row. The top header is reserved
+        // for navigation and no longer carries a second visual menu affordance.
+        IconButton(onClick = onShowOptions) {
+            Icon(
+                imageVector = Icons.Filled.MoreVert,
+                contentDescription = stringResource(R.string.cd_more_options),
+                tint = colors.textSecondary,
+                modifier = Modifier.size(dimens.iconMd),
+            )
         }
     }
 }

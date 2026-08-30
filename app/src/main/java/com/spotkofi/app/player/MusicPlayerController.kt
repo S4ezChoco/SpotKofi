@@ -14,6 +14,7 @@ import com.spotkofi.app.data.model.PlaybackStatus
 import com.spotkofi.app.data.model.RepeatMode
 import com.spotkofi.app.data.model.Track
 import com.spotkofi.app.data.remote.YouTubeTrackResolver
+import com.spotkofi.app.data.repository.MusicRepository
 import com.spotkofi.app.data.service.MusicService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,7 @@ class MusicPlayerController(
     context: Context,
     private val musicService: MusicService,
     private val localStore: LocalMusicStore,
+    private val musicRepository: MusicRepository? = null,
     dataSourceFactory: DataSource.Factory? = null,
     /**
      * Read lazily rather than captured, so toggling a playback preference takes
@@ -105,6 +107,7 @@ class MusicPlayerController(
         }
     }
     private var activePlaybackJob: Job? = null
+    private var relatedLoading = false
     private var playbackGeneration = 0L
     private var currentTrackIndex = 0
     private var playbackIntent = false
@@ -340,13 +343,79 @@ class MusicPlayerController(
                 currentTrackIndex++
                 playbackIntent = true
                 requestPlayback(currentQueue[currentTrackIndex])
-            } else if (_state.value.repeatMode == RepeatMode.All || currentQueue.size == 1) {
+            } else if (_state.value.repeatMode == RepeatMode.All) {
                 currentTrackIndex = 0
                 playbackIntent = true
                 requestPlayback(currentQueue[currentTrackIndex])
             } else {
-                stopInternal()
+                loadRelatedAndPlay()
             }
+        }
+    }
+
+    /**
+     * Extends a finite queue when the user reaches its end. The selected album,
+     * search, or playlist order remains first; only then do we ask the repository
+     * for same-artist/related material using the current content region.
+     */
+    private suspend fun loadRelatedAndPlay() {
+        if (relatedLoading) return
+        val seed = _state.value.track ?: return
+        val repository = musicRepository ?: run {
+            _state.update {
+                it.copy(
+                    isPlaying = false,
+                    status = PlaybackStatus.Paused,
+                    error = "No related songs are available",
+                )
+            }
+            playbackIntent = false
+            return
+        }
+
+        relatedLoading = true
+        _state.update { it.copy(status = PlaybackStatus.Resolving, error = null) }
+        try {
+            val details = repository.trackDetails(seed)
+            val existingIds = _queue.value.asSequence().map { it.id }.toHashSet()
+            val additions = (details.recommendations + details.moreByArtist + details.albumTracks)
+                .asSequence()
+                .filter { it.id != seed.id && existingIds.add(it.id) }
+                .take(12)
+                .toList()
+
+            if (additions.isEmpty()) {
+                playbackIntent = false
+                _state.update {
+                    it.copy(
+                        isPlaying = false,
+                        status = PlaybackStatus.Paused,
+                        error = "No related songs were found",
+                    )
+                }
+                return
+            }
+
+            val expandedQueue = _queue.value + additions
+            _queue.value = expandedQueue
+            currentTrackIndex = (currentTrackIndex + 1).coerceAtMost(expandedQueue.lastIndex)
+            playbackIntent = true
+            persistQueue()
+            requestPlayback(expandedQueue[currentTrackIndex])
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, "Unable to load related songs", failure)
+            playbackIntent = false
+            _state.update {
+                it.copy(
+                    isPlaying = false,
+                    status = PlaybackStatus.Paused,
+                    error = "Could not load the next song",
+                )
+            }
+        } finally {
+            relatedLoading = false
         }
     }
 
@@ -560,7 +629,10 @@ class MusicPlayerController(
             )
         }
 
-        val videoId = withContext(Dispatchers.IO) { trackResolver.resolveVideoId(track) }
+        val contentRegion = settingsProvider().contentRegion
+        val videoId = withContext(Dispatchers.IO) {
+            trackResolver.resolveVideoId(track, country = contentRegion)
+        }
 
         if (videoId != null) {
             streamUrlCache[videoId]?.let { cached ->
@@ -609,8 +681,9 @@ class MusicPlayerController(
                     playbackIntent = true
                     requestPlayback(currentQueue[currentTrackIndex])
                 } else {
-                    playbackIntent = false
-                    _state.update { it.copy(isPlaying = false, status = PlaybackStatus.Paused) }
+                    // Keep the current queue order intact and extend it only after
+                    // the user has consumed the explicit list.
+                    coroutineScope.launch { loadRelatedAndPlay() }
                 }
             }
         }
