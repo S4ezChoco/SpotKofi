@@ -118,21 +118,6 @@ fun ProfileDrawer(
         Spacer(Modifier.height(dimens.spaceXl))
 
         // ---- Messages ----
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = dimens.spaceLg),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Messages",
-                style = MaterialTheme.typography.headlineLarge,
-                color = colors.textPrimary,
-            )
-        }
-
-        Spacer(Modifier.height(dimens.spaceSm))
-
         conversations.forEachIndexed { index, conversation ->
             ConversationRow(conversation, index = index + 6)
         }

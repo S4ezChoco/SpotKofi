@@ -571,7 +571,7 @@ private fun HomePreview() {
     SpotKofiTheme {
         HomeContent(
             state = HomeViewModel.UiState(
-                userName = "kofi_listener",
+                userName = "SpotKofi_User",
                 quickPicks = previewQuickPicks().map(HomeQuickPick::fromCollection),
                 sections = previewHomeSections(),
                 isLoading = false,
@@ -594,7 +594,7 @@ private fun HomeEmptyPreview() {
     SpotKofiTheme {
         HomeContent(
             state = HomeViewModel.UiState(
-                userName = "kofi_listener",
+                userName = "SpotKofi_User",
                 selectedFilter = HomeFilter.Sad,
                 isLoading = false,
             ),

@@ -49,7 +49,14 @@ import kotlin.math.abs
 
 /** Upward drag distance, px, that expands into the full player. */
 private const val EXPAND_DISTANCE_PX = 36f
-private const val HORIZONTAL_SWIPE_DISTANCE_PX = 96f
+
+/**
+ * Horizontal drag distance, px, that switches tracks.
+ *
+ * Deliberately well above a finger's resting drift: the mini player sits beside
+ * vertical gestures, so a sloppy upward flick must never skip a song.
+ */
+private const val HORIZONTAL_SWIPE_DISTANCE_PX = 160f
 private const val DISMISS_DISTANCE_PX = 120f
 
 /**
@@ -139,8 +146,13 @@ fun MiniPlayer(
                         // The animated value returns to rest after every gesture;
                         // the host's player animation handles the next surface.
                         dragPx.floatValue = 0f
+                        // A track switch needs a deliberate, dominant horizontal
+                        // gesture: long enough to be intentional and moving more
+                        // sideways than up or down, so drift while scrolling or an
+                        // accidental brush on the artwork never skips a song.
                         when {
-                            abs(endedHorizontal) >= HORIZONTAL_SWIPE_DISTANCE_PX -> {
+                            abs(endedHorizontal) >= HORIZONTAL_SWIPE_DISTANCE_PX &&
+                                abs(endedHorizontal) > abs(endedVertical) -> {
                                 if (endedHorizontal < 0f) onNext() else onPrevious()
                             }
 

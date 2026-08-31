@@ -85,7 +85,7 @@ class ItunesMusicRepository internal constructor(
     private val metadataTrackResolver = com.spotkofi.app.data.remote.YouTubeTrackResolver()
     private val moodGroupsCache = MutableStateFlow<List<MoodGroup>>(emptyList())
 
-    override fun currentUserName(): String = "kofi_listener"
+    override fun currentUserName(): String = "SpotKofi_User"
 
     override fun invalidateHomeCache() {
         // Pull-to-refresh is an explicit request for new shelves, not merely a

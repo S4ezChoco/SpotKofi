@@ -84,6 +84,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spotkofi.app.R
 import com.spotkofi.app.core.LocalAppContainer
 import com.spotkofi.app.data.model.Album
@@ -96,6 +97,7 @@ import com.spotkofi.app.data.repository.previewTrack
 import com.spotkofi.app.data.repository.previewTrackDetails
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.MediaCard
+import com.spotkofi.app.feature.settings.LyricsProviderDialog
 import com.spotkofi.app.ui.components.AboutTrackCard
 import com.spotkofi.app.ui.components.LyricsCard
 import com.spotkofi.app.ui.components.LyricsSheet
@@ -244,6 +246,11 @@ private fun NowPlayingContent(
     var showQueue by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showCredits by remember { mutableStateOf(false) }
+    var showLyricsProviderPicker by remember { mutableStateOf(false) }
+
+    val container = LocalAppContainer.current
+    val settings by container.settingsStore.settings.collectAsStateWithLifecycle()
+
     // Direction is updated before the queue changes, so AnimatedContent can move
     // the outgoing artwork left for Next and right for Previous.
     var artworkSwipeDirection by remember { mutableStateOf(1) }
@@ -375,6 +382,8 @@ private fun NowPlayingContent(
                                 positionMs = state.positionMs,
                                 tint = seed,
                                 onExpand = { showLyrics = true },
+                                providerName = settings.lyricsProvider.displayName,
+                                onChangeProvider = { showLyricsProviderPicker = true },
                             )
                         }
                     }
@@ -501,6 +510,8 @@ private fun NowPlayingContent(
             positionMs = state.positionMs,
             onDismiss = { showLyrics = false },
             onSeekTo = onSeekTo,
+            providerName = settings.lyricsProvider.displayName,
+            onChangeProvider = { showLyricsProviderPicker = true },
         )
         QueueSheet(
             visible = showQueue,
@@ -511,6 +522,17 @@ private fun NowPlayingContent(
             onMove = onQueueMove,
             onClear = onQueueClear,
         )
+
+        if (showLyricsProviderPicker) {
+            LyricsProviderDialog(
+                selectedProvider = settings.lyricsProvider,
+                onSelect = { provider ->
+                    container.settingsStore.setLyricsProvider(provider)
+                    showLyricsProviderPicker = false
+                },
+                onDismiss = { showLyricsProviderPicker = false },
+            )
+        }
     }
 }
 

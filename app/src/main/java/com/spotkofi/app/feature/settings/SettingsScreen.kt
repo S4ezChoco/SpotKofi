@@ -231,28 +231,6 @@ fun SettingsScreen(
 
             settingsGroup(
                 index = 2,
-                heading = "Lyrics",
-                gutter = layout.gutter,
-            ) {
-                ToggleRow(
-                    icon = Icons.Filled.Lyrics,
-                    title = "Show lyrics",
-                    subtitle = "Look up lyrics for the playing song",
-                    checked = settings.lyricsEnabled,
-                    onCheckedChange = container.settingsStore::setLyricsEnabled,
-                )
-                RowDivider()
-                ActionRow(
-                    icon = Icons.Filled.Info,
-                    title = "Lyrics provider",
-                    subtitle = settings.lyricsProvider.description,
-                    trailingText = settings.lyricsProvider.displayName,
-                    onClick = { showLyricsProviderPicker = true },
-                )
-            }
-
-            settingsGroup(
-                index = 3,
                 heading = "Downloads",
                 gutter = layout.gutter,
             ) {
@@ -287,7 +265,7 @@ fun SettingsScreen(
             }
 
             settingsGroup(
-                index = 4,
+                index = 3,
                 heading = "Storage",
                 gutter = layout.gutter,
             ) {
@@ -331,7 +309,7 @@ fun SettingsScreen(
             }
 
             settingsGroup(
-                index = 5,
+                index = 4,
                 heading = "About",
                 gutter = layout.gutter,
             ) {
@@ -684,7 +662,7 @@ private fun AudioQualityDialog(
 // ------------------------------------------------------------ lyrics picker
 
 @Composable
-private fun LyricsProviderDialog(
+internal fun LyricsProviderDialog(
     selectedProvider: LyricsProvider,
     onSelect: (LyricsProvider) -> Unit,
     onDismiss: () -> Unit,
