@@ -50,7 +50,7 @@ import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.HomeSkeleton
 import com.spotkofi.app.ui.components.MediaCard
 import com.spotkofi.app.ui.components.ErrorState
-import com.spotkofi.app.ui.components.SpotKofiLogo
+import com.spotkofi.app.ui.components.SpotKofiScreenHeader
 import com.spotkofi.app.ui.components.QuickPickCard
 import com.spotkofi.app.ui.components.ReleaseCard
 import com.spotkofi.app.ui.components.SectionHeader
@@ -64,7 +64,6 @@ import com.spotkofi.app.ui.layout.ResponsiveLayout
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
 import com.spotkofi.app.ui.motion.staggeredEntry
 import com.spotkofi.app.ui.theme.Motion
-import com.spotkofi.app.ui.theme.SpotKofiBrandStyle
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import com.spotkofi.app.ui.theme.headerWash
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -422,20 +421,12 @@ private fun HomeHeader(
     val dimens = SpotKofiTheme.dimens
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = gutter, vertical = dimens.spaceMd),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SpotKofiLogo(onClick = onOpenProfile, size = 40.dp)
-            Spacer(Modifier.width(dimens.spaceMd))
-            Text(
-                text = "SpotKofi",
-                style = SpotKofiBrandStyle,
-                color = SpotKofiTheme.colors.accent,
-            )
-        }
+        SpotKofiScreenHeader(
+            title = "SpotKofi",
+            onLogoClick = onOpenProfile,
+            onMenuClick = onOpenProfile,
+            gutter = gutter,
+        )
 
         Row(
             modifier = Modifier

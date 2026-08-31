@@ -191,46 +191,36 @@ fun HomeSkeleton(
     modifier: Modifier = Modifier,
 ) {
     val dimens = SpotKofiTheme.dimens
+    val cols = max(2, gridColumns)
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(bottom = dimens.spaceXl),
-        verticalArrangement = Arrangement.spacedBy(dimens.spaceMd),
+        verticalArrangement = Arrangement.spacedBy(dimens.spaceXs),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = gutter),
-            horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-        ) {
-            SkeletonBox(Modifier.size(34.dp), SpotKofiTheme.shapes.avatar)
-            repeat(max(1, gridColumns)) {
-                SkeletonBox(
-                    Modifier
-                        .width(78.dp)
-                        .height(32.dp),
-                    SpotKofiTheme.shapes.chip,
-                )
+        // Quick-pick grid: 4 rows of compact cards matching the real QuickPickCard
+        // layout (artworkSmall thumbnail + text bar inside a card-coloured slab).
+        repeat(4) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = gutter),
+                horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
+            ) {
+                repeat(cols) {
+                    SkeletonBox(
+                        Modifier
+                            .weight(1f)
+                            .height(dimens.artworkSmall),
+                        SpotKofiTheme.shapes.quickPick,
+                    )
+                }
             }
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = gutter),
-            horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
-        ) {
-            repeat(max(2, gridColumns)) {
-                SkeletonBox(
-                    Modifier
-                        .weight(1f)
-                        .height(64.dp),
-                    SpotKofiTheme.shapes.quickPick,
-                )
-            }
-        }
-        SkeletonShelf(titleWidth = 116.dp, cardWidth = shelfWidth, gutter = gutter)
-        SkeletonShelf(titleWidth = 92.dp, cardWidth = shelfWidth, gutter = gutter)
-        repeat(4) { SkeletonTrackRow() }
+        Spacer(Modifier.height(dimens.spaceMd))
+        SkeletonShelf(titleWidth = 148.dp, cardWidth = shelfWidth, gutter = gutter)
+        Spacer(Modifier.height(dimens.spaceSm))
+        SkeletonShelf(titleWidth = 112.dp, cardWidth = shelfWidth, gutter = gutter)
     }
 }
 

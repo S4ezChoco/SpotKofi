@@ -68,9 +68,9 @@ import com.spotkofi.app.data.service.DownloadItem
 import com.spotkofi.app.data.service.DownloadManagerStatus
 import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.Artwork
-import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.SavedToggle
 import com.spotkofi.app.ui.components.SpotKofiChip
+import com.spotkofi.app.ui.components.SpotKofiScreenHeader
 import com.spotkofi.app.ui.components.TrackActionsSheet
 import com.spotkofi.app.ui.components.TrackRow
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
@@ -134,7 +134,6 @@ fun LibraryScreen(
         label = "libraryStickyHeader",
     )
 
-    val userName = remember { repository.currentUserName() }
     val savedCollections by store.savedCollections.collectAsStateWithLifecycle()
     val playlists by store.playlists.collectAsStateWithLifecycle()
     val savedTracks by store.savedTracks.collectAsStateWithLifecycle()
@@ -217,7 +216,6 @@ fun LibraryScreen(
                             .padding(top = contentPadding.calculateTopPadding()),
                     ) {
                         LibraryHeader(
-                            userName = userName,
                             onOpenProfile = onOpenProfile,
                             onSearchClick = { showLibrarySearch = true },
                             onAnalyticsClick = { showAnalytics = !showAnalytics },
@@ -584,7 +582,6 @@ private fun LibrarySearchContent(
 
 @Composable
 private fun LibraryHeader(
-    userName: String,
     onOpenProfile: () -> Unit,
     onSearchClick: () -> Unit,
     onAnalyticsClick: () -> Unit,
@@ -592,24 +589,12 @@ private fun LibraryHeader(
     onCreate: () -> Unit,
 ) {
     val colors = SpotKofiTheme.colors
-    val dimens = SpotKofiTheme.dimens
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = dimens.screenGutter, vertical = dimens.spaceMd),
-        verticalAlignment = Alignment.CenterVertically,
+    SpotKofiScreenHeader(
+        title = "Your Library",
+        onLogoClick = onOpenProfile,
+        onMenuClick = onOpenProfile,
     ) {
-        ProfileAvatar(name = userName, onClick = onOpenProfile, size = 38.dp)
-        Spacer(Modifier.width(dimens.spaceMd))
-        Text(
-            text = "Your Library",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = colors.textPrimary,
-            maxLines = 1,
-        )
-        Spacer(Modifier.weight(1f))
         IconButton(onClick = onAnalyticsClick) {
             Icon(
                 imageVector = Icons.Filled.ShowChart,

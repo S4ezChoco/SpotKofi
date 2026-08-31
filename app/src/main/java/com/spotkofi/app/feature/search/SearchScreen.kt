@@ -63,8 +63,8 @@ import com.spotkofi.app.data.model.asTrackDuration
 import com.spotkofi.app.ui.components.AppFooter
 import com.spotkofi.app.ui.components.Artwork
 import com.spotkofi.app.ui.components.ErrorState
-import com.spotkofi.app.ui.components.ProfileAvatar
 import com.spotkofi.app.ui.components.SearchSkeleton
+import com.spotkofi.app.ui.components.SpotKofiScreenHeader
 import com.spotkofi.app.ui.components.SpotKofiChip
 import com.spotkofi.app.ui.components.TrackActionsSheet
 import com.spotkofi.app.ui.components.TrackRow
@@ -158,7 +158,6 @@ fun SearchScreen(
 ) {
     val container = LocalAppContainer.current
     val repository = container.musicRepository
-    val userName = remember { repository.currentUserName() }
     val dimens = SpotKofiTheme.dimens
 
     var query by remember { mutableStateOf("") }
@@ -210,7 +209,7 @@ fun SearchScreen(
                 .background(SpotKofiTheme.colors.base)
                 .padding(contentPadding),
         ) {
-            SearchHeader(userName = userName, onOpenProfile = onOpenProfile)
+            SearchHeader(onOpenProfile = onOpenProfile)
 
             SearchField(
                 query = query,
@@ -256,28 +255,13 @@ fun SearchScreen(
 
 @Composable
 private fun SearchHeader(
-    userName: String,
     onOpenProfile: () -> Unit,
 ) {
-    val dimens = SpotKofiTheme.dimens
-
-    // The camera button that used to sit here is gone: it had an empty click
-    // handler, and a control that looks live but does nothing is worse than no
-    // control at all.
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = dimens.screenGutter, vertical = dimens.spaceMd),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ProfileAvatar(name = userName, onClick = onOpenProfile, size = 38.dp)
-        Spacer(Modifier.width(dimens.spaceMd))
-        Text(
-            text = "Search",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-        )
-    }
+    SpotKofiScreenHeader(
+        title = "Search",
+        onLogoClick = onOpenProfile,
+        onMenuClick = onOpenProfile,
+    )
 }
 
 /**
@@ -615,20 +599,25 @@ private fun ColumnScope.SearchLanding(
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
     val browseCategories = LocalAppContainer.current.musicRepository.browseCategories()
-    val browseTiles = browseCategories.mapIndexed { index, category ->
-        SearchCategory(
-            title = category.name,
-            subtitle = category.subtitle ?: "Search the catalog",
-            color = listOf(
-                Color(0xFF5B35D5),
-                Color(0xFF087A61),
-                Color(0xFFE41483),
-                Color(0xFFB85B12),
-            )[index % 4],
-            artworkUrl = category.artworkUrl,
-            targetQuery = category.targetQuery,
-        )
-    }
+    // Filter out categories already shown in the top "Browse all" grid so the
+    // user does not see the same Music / Podcasts tile twice.
+    val topTitles = searchCategories.map { it.title.lowercase() }.toSet()
+    val browseTiles = browseCategories
+        .filter { it.name.lowercase() !in topTitles }
+        .mapIndexed { index, category ->
+            SearchCategory(
+                title = category.name,
+                subtitle = category.subtitle ?: "Search the catalog",
+                color = listOf(
+                    Color(0xFF5B35D5),
+                    Color(0xFF087A61),
+                    Color(0xFFE41483),
+                    Color(0xFFB85B12),
+                )[index % 4],
+                artworkUrl = category.artworkUrl,
+                targetQuery = category.targetQuery,
+            )
+        }
 
     LazyColumn(
         modifier = Modifier.weight(1f),
