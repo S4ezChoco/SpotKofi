@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -46,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -60,9 +60,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,12 +77,25 @@ import com.spotkofi.app.data.model.ChartRegion
 import com.spotkofi.app.data.local.AudioQuality
 import com.spotkofi.app.data.local.LyricsProvider
 import com.spotkofi.app.ui.components.AppFooter
+import com.spotkofi.app.ui.components.SpotKofiLogo
 import com.spotkofi.app.ui.layout.rememberResponsiveLayout
 import com.spotkofi.app.ui.motion.clickableScale
 import com.spotkofi.app.ui.motion.staggeredEntry
 import com.spotkofi.app.ui.theme.Motion
+import com.spotkofi.app.ui.theme.SpotKofiBrandStyle
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlinx.coroutines.launch
+
+/**
+ * Soft brown accents local to the Settings page.
+ *
+ * A coffee shade suits the app's name without repainting the whole product:
+ * playback keeps the brand green, while Settings wears a muted caramel. Both
+ * stay soft on purpose — saturated brown would read as error red on a dark
+ * background.
+ */
+private val SettingsBrown = Color(0xFFB08D6A)
+private val SettingsBrownDim = Color(0xFF8F6B4F)
 
 /**
  * The app's real preferences.
@@ -129,7 +146,7 @@ fun SettingsScreen(
         }
     }
     val barColor by animateColorAsState(
-        targetValue = if (lifted) colors.highlight else colors.base,
+        targetValue = if (lifted) colors.highlight else Color.Transparent,
         animationSpec = Motion.fast(),
         label = "settingsBar",
     )
@@ -144,7 +161,17 @@ fun SettingsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(colors.base),
+            // A quiet brand wash fading out of the top of the page — the same
+            // treatment every other SpotKofi screen gives its header. Blended
+            // into the base colour rather than painted over it, so the scrolled
+            // bar above can stay opaque while the resting bar stays clear.
+            .background(
+                Brush.verticalGradient(
+                    0f to lerp(colors.base, SettingsBrownDim, 0.30f),
+                    0.10f to lerp(colors.base, SettingsBrownDim, 0.12f),
+                    0.22f to colors.base,
+                ),
+            ),
     ) {
         Row(
             modifier = Modifier
@@ -161,9 +188,12 @@ fun SettingsScreen(
                     tint = colors.textPrimary,
                 )
             }
+            Spacer(Modifier.width(dimens.spaceXxs))
+            SpotKofiLogo(size = 26.dp)
+            Spacer(Modifier.width(dimens.spaceSm))
             Text(
                 text = "Settings",
-                style = MaterialTheme.typography.headlineMedium,
+                style = SpotKofiBrandStyle,
                 color = colors.textPrimary,
                 modifier = Modifier.weight(1f),
             )
@@ -423,19 +453,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsGroup(
         ) {
             Text(
                 text = heading,
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary,
                 modifier = Modifier.padding(
                     start = dimens.spaceXs,
                     bottom = dimens.spaceSm,
                 ),
             )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(SpotKofiTheme.shapes.group)
-                    .background(colors.card),
-            ) {
+            // Rows sit flat on the page background with no card surface and no
+            // outline — the dividers inside the group are the only separation,
+            // which is how native settings lists are drawn.
+            Column(modifier = Modifier.fillMaxWidth()) {
                 content()
             }
         }
@@ -448,7 +477,7 @@ private fun RowDivider() {
     val dimens = SpotKofiTheme.dimens
     Box(
         modifier = Modifier
-            .padding(start = dimens.spaceLg + 36.dp + dimens.spaceMd)
+            .padding(start = dimens.iconMd + dimens.spaceMd)
             .fillMaxWidth()
             .height(1.dp)
             .background(colors.divider.copy(alpha = 0.6f)),
@@ -459,20 +488,16 @@ private fun RowDivider() {
 private fun RowIcon(icon: ImageVector, tinted: Boolean) {
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(colors.iconWell),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (tinted) colors.textPrimary else colors.textTertiary,
-            modifier = Modifier.size(dimens.iconSm),
-        )
-    }
+
+    // A bare glyph — no tile, no well, no border. The icon sizes itself to the
+    // same 24dp the rest of the app's chrome uses, so rows read as a native
+    // list rather than as decorated cards.
+    Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = if (tinted) colors.textPrimary else colors.textTertiary,
+        modifier = Modifier.size(dimens.iconMd),
+    )
 }
 
 @Composable
@@ -482,6 +507,7 @@ private fun RowText(title: String, subtitle: String?, enabled: Boolean) {
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
             color = if (enabled) colors.textPrimary else colors.textTertiary,
         )
         if (!subtitle.isNullOrBlank()) {
@@ -519,7 +545,7 @@ private fun ToggleRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickableScale(pressedScale = 0.99f) { onCheckedChange(!checked) }
-            .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
+            .padding(vertical = dimens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RowIcon(icon, tinted = true)
@@ -533,8 +559,8 @@ private fun ToggleRow(
             onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = colors.onAccent,
-                checkedTrackColor = colors.accent,
-                checkedBorderColor = colors.accent,
+                checkedTrackColor = SettingsBrown,
+                checkedBorderColor = SettingsBrown,
                 uncheckedThumbColor = colors.textSecondary,
                 uncheckedTrackColor = colors.chip,
                 uncheckedBorderColor = colors.divider,
@@ -560,7 +586,7 @@ private fun ActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickableScale(pressedScale = 0.99f, enabled = enabled, onClick = onClick)
-            .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
+            .padding(vertical = dimens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RowIcon(icon, tinted = enabled)
@@ -570,10 +596,16 @@ private fun ActionRow(
         }
         if (trailingText != null) {
             Spacer(Modifier.width(dimens.spaceSm))
+            // The current value reads as one of the app's chips rather than as
+            // floating accent text, so it anchors the row visually.
             Text(
                 text = trailingText,
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.accent,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                modifier = Modifier
+                    .clip(SpotKofiTheme.shapes.chip)
+                    .background(colors.chip)
+                    .padding(horizontal = dimens.spaceMd, vertical = 6.dp),
             )
         }
     }
@@ -597,7 +629,7 @@ private fun InfoRow(
                 enabled = onClick != null,
                 onClick = onClick ?: {},
             )
-            .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceMd),
+            .padding(vertical = dimens.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RowIcon(icon, tinted = true)
@@ -619,6 +651,7 @@ private fun AudioQualityDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = SpotKofiTheme.shapes.sheet,
         containerColor = colors.highlight,
         titleContentColor = colors.textPrimary,
         title = { Text("Audio quality") },
@@ -633,7 +666,11 @@ private fun AudioQualityDialog(
                             .padding(horizontal = dimens.spaceSm, vertical = dimens.spaceXs),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = quality == selectedQuality, onClick = null)
+                        RadioButton(
+                            selected = quality == selectedQuality,
+                            onClick = null,
+                            colors = RadioButtonDefaults.colors(selectedColor = SettingsBrown),
+                        )
                         Spacer(Modifier.width(dimens.spaceSm))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -653,7 +690,7 @@ private fun AudioQualityDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = colors.accent)
+                Text("Done", color = SettingsBrown)
             }
         },
     )
@@ -672,6 +709,7 @@ internal fun LyricsProviderDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = SpotKofiTheme.shapes.sheet,
         containerColor = colors.highlight,
         titleContentColor = colors.textPrimary,
         title = { Text("Lyrics provider") },
@@ -689,6 +727,7 @@ internal fun LyricsProviderDialog(
                         RadioButton(
                             selected = provider == selectedProvider,
                             onClick = null,
+                            colors = RadioButtonDefaults.colors(selectedColor = SettingsBrown),
                         )
                         Spacer(Modifier.width(dimens.spaceSm))
                         Column(modifier = Modifier.weight(1f)) {
@@ -709,7 +748,7 @@ internal fun LyricsProviderDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = colors.accent)
+                Text("Done", color = SettingsBrown)
             }
         },
     )
@@ -736,6 +775,7 @@ private fun RegionPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = SpotKofiTheme.shapes.sheet,
         containerColor = colors.highlight,
         titleContentColor = colors.textPrimary,
         title = { Text("Content region") },
@@ -760,14 +800,14 @@ private fun RegionPickerDialog(
                         Text(
                             text = region.name,
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (isSelected) colors.accent else colors.textPrimary,
+                            color = if (isSelected) SettingsBrown else colors.textPrimary,
                             modifier = Modifier.weight(1f),
                         )
                         if (isSelected) {
                             Icon(
                                 imageVector = Icons.Filled.Check,
                                 contentDescription = null,
-                                tint = colors.accent,
+                                tint = SettingsBrown,
                                 modifier = Modifier.size(dimens.iconSm),
                             )
                         }
@@ -777,7 +817,7 @@ private fun RegionPickerDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = colors.accent)
+                Text("Done", color = SettingsBrown)
             }
         },
     )
@@ -850,6 +890,7 @@ private fun ConfirmDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = SpotKofiTheme.shapes.sheet,
         containerColor = colors.highlight,
         titleContentColor = colors.textPrimary,
         textContentColor = colors.textSecondary,
@@ -864,7 +905,7 @@ private fun ConfirmDialog(
         text = { Text(action.message) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text(action.confirmLabel, color = colors.accent)
+                Text(action.confirmLabel, color = SettingsBrown)
             }
         },
         dismissButton = {
