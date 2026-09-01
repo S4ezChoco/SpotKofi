@@ -1,7 +1,10 @@
 package com.spotkofi.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -18,6 +21,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
@@ -51,6 +55,7 @@ private fun optimizedArtworkUrl(url: String): String = url.trim()
     .replace(Regex("\\d+x\\d+(?=bb)"), "1200x1200")
     .replace(Regex("w\\d+-h\\d+"), "w1200-h1200")
     .replace(Regex("=w\\d+(?=-|$)"), "=w1200")
+    .replace(Regex("=s\\d+(?![0-9])"), "=s1200")
 
 /** Cover art with a deterministic, non-letter fallback for missing or failed URLs. */
 @Composable
@@ -126,4 +131,42 @@ fun Artwork(
         contentDescription = contentDescription,
         modifier = modifier.then(Modifier.size(size)),
     )
+}
+
+/**
+ * A 2x2 grid of artwork thumbnails for community playlists.
+ *
+ * When a playlist has multiple thumbnail URLs (up to 4), this renders them in a
+ * compact grid instead of a single blurred image.
+ */
+@Composable
+fun CommunityArtwork(
+    id: String,
+    urls: List<String>,
+    modifier: Modifier = Modifier,
+    shape: Shape = SpotKofiTheme.shapes.artwork,
+) {
+    val displayUrls = urls.take(4)
+    Box(
+        modifier = modifier.clip(shape),
+    ) {
+        if (displayUrls.size >= 4) {
+            // 2x2 grid
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.weight(1f)) {
+                    Artwork(id = "$id-0", url = displayUrls[0], modifier = Modifier.weight(1f).aspectRatio(1f), shape = RectangleShape)
+                    Artwork(id = "$id-1", url = displayUrls[1], modifier = Modifier.weight(1f).aspectRatio(1f), shape = RectangleShape)
+                }
+                Row(modifier = Modifier.weight(1f)) {
+                    Artwork(id = "$id-2", url = displayUrls[2], modifier = Modifier.weight(1f).aspectRatio(1f), shape = RectangleShape)
+                    Artwork(id = "$id-3", url = displayUrls[3], modifier = Modifier.weight(1f).aspectRatio(1f), shape = RectangleShape)
+                }
+            }
+        } else if (displayUrls.isNotEmpty()) {
+            // Fallback to single artwork if less than 4 URLs
+            Artwork(id = id, url = displayUrls.first(), modifier = Modifier.fillMaxSize(), shape = shape)
+        } else {
+            Artwork(id = id, modifier = Modifier.fillMaxSize(), shape = shape)
+        }
+    }
 }

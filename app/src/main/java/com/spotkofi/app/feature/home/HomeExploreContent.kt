@@ -105,10 +105,18 @@ fun HomeExploreSections(
         return
     }
 
-    if (state.trendingPlaylists.isNotEmpty()) {
+    // Deduplicate trending playlists against chart shelves so the same playlist
+    // does not appear in both the trending row and the chart section below.
+    val chartPlaylistIds = state.chart?.shelves
+        ?.flatMap { it.items }
+        ?.map { it.id }
+        .orEmpty()
+        .toSet()
+    val uniqueTrending = state.trendingPlaylists.filterNot { it.id in chartPlaylistIds }
+    if (uniqueTrending.isNotEmpty()) {
         HomeCollectionShelf(
             title = "Trending playlists",
-            items = state.trendingPlaylists,
+            items = uniqueTrending.take(8),
             layout = layout,
             onCollectionClick = onCollectionClick,
         )
@@ -294,25 +302,7 @@ private fun HomeChart(
             }
         }
 
-        if (chart.shelves.isNotEmpty()) {
-            SectionHeader(title = "Video charts")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = layout.gutter),
-                horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd),
-            ) {
-                chart.shelves.flatMap { it.items }.distinctBy { it.id }
-                    .take(8)
-                    .forEach { item ->
-                        item(key = item.id) {
-                            MediaCard(
-                                item = item,
-                                width = layout.shelfCardWidth,
-                                onClick = { onCollectionClick(item.id) },
-                            )
-                        }
-                    }
-            }
-        }
+        // Video charts section removed - this was a duplicate, chart shelves are handled elsewhere
 
         if (chart.topArtists.isNotEmpty()) {
             SectionHeader(title = "Top artists")
@@ -407,7 +397,7 @@ private fun RegionButton(
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(22.dp))
-            .background(Color.Transparent)
+            .background(colors.brown.copy(alpha = 0.15f))
             .clickableScale(pressedScale = 0.98f, onClick = onClick)
             .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
@@ -416,15 +406,16 @@ private fun RegionButton(
         Icon(
             imageVector = Icons.Filled.Public,
             contentDescription = null,
-            tint = colors.textPrimary,
+            tint = colors.brown,
             modifier = Modifier.size(dimens.iconSm),
         )
         Text(
             text = regionName,
             style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary,
+            color = colors.brown,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            fontWeight = FontWeight.Medium,
         )
         if (loading) {
             SkeletonBox(
@@ -435,7 +426,7 @@ private fun RegionButton(
             Text(
                 text = regionCode,
                 style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary,
+                color = colors.brown,
             )
         }
     }
@@ -505,7 +496,7 @@ fun HomeRegionDialog(
                         ) {
                             Text(
                                 text = region.name,
-                                color = if (selected) colors.accent else colors.textPrimary,
+                                color = if (selected) colors.brown else colors.textPrimary,
                                 style = MaterialTheme.typography.bodyLarge,
                                 modifier = Modifier.weight(1f),
                             )
@@ -513,7 +504,7 @@ fun HomeRegionDialog(
                                 Icon(
                                     imageVector = Icons.Filled.Check,
                                     contentDescription = null,
-                                    tint = colors.accent,
+                                    tint = colors.brown,
                                     modifier = Modifier.size(dimens.iconSm),
                                 )
                             }
@@ -524,7 +515,7 @@ fun HomeRegionDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = colors.accent)
+                Text("Done", color = colors.brown)
             }
         },
     )

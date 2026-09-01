@@ -25,6 +25,10 @@ val KofiGreenDim = Color(0xFF1DB954)
 val KofiGreenPressed = Color(0xFF169C46)
 val KofiGreenDeep = Color(0xFF117032)
 
+// Brown accent for stats and chart features
+val KofiBrown = Color(0xFFB08D6A)
+val KofiBrownDim = Color(0xFF8F6B4F)
+
 // ---------- Neutral ramp ----------
 /** App background. Everything else sits on top of this. */
 val Base = Color(0xFF121212)
@@ -117,6 +121,8 @@ data class SpotKofiColors(
     val accentDim: Color = KofiGreenDim,
     val onAccent: Color = OnGreen,
     val explicit: Color = ExplicitGrey,
+    val brown: Color = KofiBrown,
+    val brownDim: Color = KofiBrownDim,
 )
 
 /**

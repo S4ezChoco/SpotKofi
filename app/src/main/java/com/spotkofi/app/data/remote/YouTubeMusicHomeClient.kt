@@ -14,6 +14,7 @@ import com.spotkofi.app.data.remote.Innertube.runObjects
 import com.spotkofi.app.data.remote.Innertube.runText
 import com.spotkofi.app.data.remote.Innertube.string
 import com.spotkofi.app.data.remote.Innertube.thumbnailUrl
+import com.spotkofi.app.data.remote.Innertube.thumbnailUrls
 import com.spotkofi.app.data.remote.Innertube.videoId
 import com.spotkofi.app.data.remote.Innertube.walkObjects
 import kotlinx.coroutines.Dispatchers
@@ -170,6 +171,7 @@ internal class YouTubeMusicHomeClient(
                 description = subtitle.firstOrNull().orEmpty(),
                 ownerName = subtitle.firstOrNull().orEmpty().ifEmpty { "YouTube Music" },
                 artworkUrl = renderer.thumbnailUrl(),
+                artworkUrls = renderer.thumbnailUrls(),
             )
 
             else -> null

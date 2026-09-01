@@ -212,6 +212,29 @@ internal object Innertube {
         }
     }
 
+    /**
+     * Like [walkObjects], but skips `thumbnailCornerOverlay` subtrees.
+     *
+     * Community-playlist cards carry a corner overlay holding the *owner's channel
+     * avatar* - a tiny letter tile on most channels. Walking it used to leak that
+     * avatar into the item's artwork: `thumbnailUrl` picked it as the last nested
+     * thumbnail (a stretched, blurry "J"), and the multi-image grid filled its
+     * remaining cells with the same avatar at two sizes.
+     */
+    fun JsonElement.walkPrimaryObjects(): Sequence<JsonObject> = sequence {
+        when (val element = this@walkPrimaryObjects) {
+            is JsonObject -> {
+                yield(element)
+                element.forEach { (key, child) ->
+                    if (key != "thumbnailCornerOverlay") yieldAll(child.walkPrimaryObjects())
+                }
+            }
+
+            is JsonArray -> element.forEach { child -> yieldAll(child.walkPrimaryObjects()) }
+            else -> Unit
+        }
+    }
+
     fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 
     fun JsonElement?.runObjects(): List<JsonObject> =
@@ -232,13 +255,37 @@ internal object Innertube {
         return renderer["text"].runObjects()
     }
 
-    /** Largest thumbnail, which is the last entry in YouTube's ascending list. */
-    fun JsonObject.thumbnailUrl(): String? = walkObjects()
+    /** The item's own largest cover thumbnail, ignoring corner-overlay avatars. */
+    fun JsonObject.thumbnailUrl(): String? = walkPrimaryObjects()
         .mapNotNull { it["thumbnails"] as? JsonArray }
         .flatMap { it.asSequence() }
         .mapNotNull { it as? JsonObject }
         .mapNotNull { it.string("url") }
         .lastOrNull()
+
+    /** Matches the size suffix of a thumbnail URL (e.g. `=w544-h544-p-l90-rj` or `-w60-h60`). */
+    private val thumbnailSizeSuffix = Regex("[-=]w\\d+-h\\d+[^/]*$")
+
+    /**
+     * Distinct cover images, ignoring corner-overlay avatars.
+     *
+     * Community playlists ship a single server-composed collage cover served at
+     * several sizes, so after size-deduplication this usually holds exactly one
+     * image - and the UI falls back to showing that collage full-size, which is
+     * what YouTube Music itself renders.
+     */
+    fun JsonObject.thumbnailUrls(): List<String> = walkPrimaryObjects()
+        .mapNotNull { it["thumbnails"] as? JsonArray }
+        .flatMap { it.asSequence() }
+        .mapNotNull { it as? JsonObject }
+        .mapNotNull { thumb ->
+            val url = thumb.string("url") ?: return@mapNotNull null
+            url to (thumb.string("width")?.toIntOrNull() ?: 0)
+        }
+        .groupBy { (url, _) -> thumbnailSizeSuffix.replace(url, "").substringBefore("=") }
+        .map { (_, variants) -> variants.maxBy { it.second }.first }
+        .take(4)
+        .toList()
 
     fun JsonObject.containsString(key: String, expected: String): Boolean =
         walkObjects().any { it.string(key) == expected }

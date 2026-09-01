@@ -250,18 +250,6 @@ fun LibraryScreen(
                             bottom = contentPadding.calculateBottomPadding(),
                         ),
                     ) {
-                        item(key = "shortcuts") {
-                            LibraryShortcuts(
-                                favoriteCount = savedTracks.size,
-                                followedCount = followedArtists.size,
-                                mostPlayedCount = historyStats.sumOf { it.playCount },
-                                downloadedCount = downloadedTracks.size,
-                                onFavorite = { filter = LibraryFilter.Songs },
-                                onFollowed = { filter = LibraryFilter.Followed },
-                                onMostPlayed = { filter = LibraryFilter.MostPlayed },
-                                onDownloaded = { filter = LibraryFilter.Downloaded },
-                            )
-                        }
 
                         if (showAnalytics) {
                             item(key = "analytics") {
@@ -599,7 +587,7 @@ private fun LibraryHeader(
             Icon(
                 imageVector = Icons.Filled.ShowChart,
                 contentDescription = if (analyticsOpen) "Hide listening stats" else "Open listening stats",
-                tint = if (analyticsOpen) colors.accent else colors.textPrimary,
+                tint = if (analyticsOpen) colors.brown else colors.textPrimary,
             )
         }
         IconButton(onClick = onSearchClick) {

@@ -195,7 +195,7 @@ fun HomeSkeleton(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = dimens.spaceXl),
+            .padding(top = dimens.spaceLg, bottom = dimens.spaceXl),
         verticalArrangement = Arrangement.spacedBy(dimens.spaceXs),
     ) {
         // Quick-pick grid: 4 rows of compact cards matching the real QuickPickCard
@@ -217,9 +217,9 @@ fun HomeSkeleton(
                 }
             }
         }
-        Spacer(Modifier.height(dimens.spaceMd))
+        Spacer(Modifier.height(dimens.spaceLg))
         SkeletonShelf(titleWidth = 148.dp, cardWidth = shelfWidth, gutter = gutter)
-        Spacer(Modifier.height(dimens.spaceSm))
+        Spacer(Modifier.height(dimens.spaceMd))
         SkeletonShelf(titleWidth = 112.dp, cardWidth = shelfWidth, gutter = gutter)
     }
 }

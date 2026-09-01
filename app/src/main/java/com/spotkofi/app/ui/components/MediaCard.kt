@@ -59,14 +59,25 @@ fun MediaCard(
             .padding(vertical = dimens.spaceXs),
         horizontalAlignment = alignment,
     ) {
-        Artwork(
-            id = item.id,
-            url = item.artworkUrl,
-            shape = if (isArtist) shapes.avatar else shapes.artwork,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f),
-        )
+        if (item is Playlist && item.artworkUrls.size >= 4) {
+            CommunityArtwork(
+                id = item.id,
+                urls = item.artworkUrls,
+                shape = shapes.artwork,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f),
+            )
+        } else {
+            Artwork(
+                id = item.id,
+                url = item.artworkUrl,
+                shape = if (isArtist) shapes.avatar else shapes.artwork,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f),
+            )
+        }
 
         Spacer(Modifier.height(dimens.spaceSm))
 

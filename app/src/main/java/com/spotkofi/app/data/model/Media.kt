@@ -70,6 +70,8 @@ data class Playlist(
     val ownerName: String,
     val trackIds: List<String> = emptyList(),
     override val artworkUrl: String? = null,
+    /** Multiple thumbnail URLs for community playlists (up to 4 images). */
+    val artworkUrls: List<String> = emptyList(),
     /** Pinned entries sort to the top of Your Library and show a green pin. */
     val isPinned: Boolean = false,
 ) : MediaCollection {

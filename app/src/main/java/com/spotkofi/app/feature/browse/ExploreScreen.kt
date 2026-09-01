@@ -360,7 +360,7 @@ private fun RegionButton(
                 vertical = dimens.spaceMd,
             )
             .clip(SpotKofiTheme.shapes.chip)
-            .background(colors.chip)
+            .background(colors.brown.copy(alpha = 0.15f))
             .clickableScale(pressedScale = 0.97f, onClick = onClick)
             .padding(horizontal = dimens.spaceLg, vertical = dimens.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
@@ -369,15 +369,16 @@ private fun RegionButton(
         Icon(
             imageVector = Icons.Filled.Public,
             contentDescription = null,
-            tint = colors.textPrimary,
+            tint = colors.brown,
             modifier = Modifier.size(dimens.iconSm),
         )
         Text(
             text = regionName,
             style = MaterialTheme.typography.labelLarge,
-            color = colors.textPrimary,
+            color = colors.brown,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            fontWeight = FontWeight.Medium,
         )
         if (loading) {
             SkeletonBox(
@@ -388,7 +389,7 @@ private fun RegionButton(
             Text(
                 text = regionCode,
                 style = MaterialTheme.typography.labelMedium,
-                color = colors.accent,
+                color = colors.brown,
             )
         }
     }
@@ -594,14 +595,14 @@ private fun RegionDialog(
                         Text(
                             text = region.name,
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (isSelected) colors.accent else colors.textPrimary,
+                            color = if (isSelected) colors.brown else colors.textPrimary,
                             modifier = Modifier.weight(1f),
                         )
                         if (isSelected) {
                             Icon(
                                 imageVector = Icons.Filled.Check,
                                 contentDescription = null,
-                                tint = colors.accent,
+                                tint = colors.brown,
                                 modifier = Modifier.size(dimens.iconSm),
                             )
                         }
@@ -611,7 +612,7 @@ private fun RegionDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = colors.accent)
+                Text("Done", color = colors.brown)
             }
         },
     )
