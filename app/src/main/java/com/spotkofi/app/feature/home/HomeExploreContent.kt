@@ -72,9 +72,12 @@ fun HomeExploreSections(
     onMoodClick: (MoodCategory) -> Unit,
     onRegionClick: () -> Unit,
 ) {
+    // A mood filter adds its results at the top of the feed; the rest of the
+    // Home content below stays visible instead of being swapped out, so a
+    // filter narrows what is shown first rather than replacing the feed.
     val selectedMood = state.selectedMood
-    if (selectedMood != null || state.selectedFilter != HomeFilter.All) {
-        if (state.isMoodLoading) {
+    when {
+        state.isMoodLoading -> {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(SpotKofiTheme.dimens.spaceMd),
@@ -82,7 +85,8 @@ fun HomeExploreSections(
                 SkeletonShelf(gutter = layout.gutter)
                 repeat(4) { SkeletonTrackRow() }
             }
-        } else if (selectedMood != null) {
+        }
+        selectedMood != null -> {
             MoodResults(
                 content = selectedMood,
                 layout = layout,
@@ -91,7 +95,9 @@ fun HomeExploreSections(
                 onTrackClick = onTrackClick,
                 onTrackMore = onTrackMore,
             )
-        } else {
+            Spacer(Modifier.height(SpotKofiTheme.dimens.shelfSpacing))
+        }
+        state.selectedFilter != HomeFilter.All -> {
             Text(
                 text = "That mood is not available in this region yet.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -102,7 +108,6 @@ fun HomeExploreSections(
                 ),
             )
         }
-        return
     }
 
     // Deduplicate trending playlists against chart shelves so the same playlist

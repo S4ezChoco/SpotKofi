@@ -141,6 +141,11 @@ class HomeViewModel(
             ?: settingsStore?.current?.contentRegion
             ?: _uiState.value.regionCode
         val isRegionReload = regionOverride != null && !refreshing
+        // The selected filter survives a refresh; its mood results are re-fetched
+        // after the feed finishes loading instead of dropping the user onto a
+        // misleading "mood not available" placeholder.
+        val activeFilter = _uiState.value.selectedFilter
+        val regionChanged = region != _uiState.value.regionCode
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             val refreshStartedAt = if (refreshing) System.currentTimeMillis() else 0L
@@ -155,7 +160,10 @@ class HomeViewModel(
                     isRegionLoading = isRegionReload,
                     error = null,
                     isMoodLoading = false,
-                    selectedMood = null,
+                    // Mood content opened from a tile is tied to the region it was
+                    // loaded for: a region change invalidates it, a refresh does
+                    // not — the filter's results are re-fetched below instead.
+                    selectedMood = if (regionChanged) null else it.selectedMood,
                 )
             }
             try {
@@ -196,7 +204,10 @@ class HomeViewModel(
                     }
                     val hasContent = loadedPicks.isNotEmpty() || loadedSections.isNotEmpty() ||
                         loadedTrending.isNotEmpty() || loadedReleases.isNotEmpty() ||
-                        loadedMoods.isNotEmpty() || loadedChart != null || history.isNotEmpty()
+                        loadedMoods.isNotEmpty() || loadedChart != null || history.isNotEmpty() ||
+                        // Kept mood results are live content too; a failed feed
+                        // re-fetch must not cover them with the error state.
+                        _uiState.value.selectedMood != null
 
                     _uiState.update {
                         it.copy(
@@ -216,6 +227,15 @@ class HomeViewModel(
                             },
                         )
                     }
+                }
+
+                // Re-resolve the active filter against the freshly loaded mood
+                // groups and refresh its results. Skipped when the user picked a
+                // different filter while the feed was still reloading.
+                if (activeFilter != HomeFilter.All &&
+                    _uiState.value.selectedFilter == activeFilter
+                ) {
+                    findCategory(activeFilter)?.let(::loadMood)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -279,50 +299,63 @@ class HomeViewModel(
 
     /** Changes the top filter; mood chips open the provider's matching category. */
     fun onFilterClick(filter: HomeFilter) {
-        if (_uiState.value.selectedFilter == filter) return
-        _uiState.update { it.copy(selectedFilter = filter, selectedMood = null) }
+        val alreadySelected = _uiState.value.selectedFilter == filter
+        _uiState.update {
+            it.copy(
+                selectedFilter = filter,
+                selectedMood = if (alreadySelected) it.selectedMood else null,
+            )
+        }
         if (filter == HomeFilter.All) return
 
-        val category = findCategory(filter)
-        if (category == null) return
+        // Re-tapping the active chip retries a failed or missing mood load;
+        // content that is already on screen is left untouched.
+        if (alreadySelected && _uiState.value.selectedMood != null) return
 
-        moodJob?.cancel()
-        moodJob = viewModelScope.launch {
-            _uiState.update { it.copy(isMoodLoading = true, error = null) }
-            try {
-                val content = repository.moodCategory(category)
-                _uiState.update {
-                    it.copy(selectedMood = content, isMoodLoading = false)
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isMoodLoading = false,
-                        error = failure.message ?: "Could not load this mood",
-                    )
-                }
-            }
-        }
+        val category = findCategory(filter) ?: return
+        loadMood(category)
     }
 
     /** Opens any provider tile without requiring a title-to-search detour. */
     fun onMoodClick(category: MoodCategory) {
+        _uiState.update {
+            it.copy(
+                selectedFilter = HomeFilter.All,
+                selectedMood = null,
+                error = null,
+            )
+        }
+        loadMood(category, notLoadedMessage = "Could not load this category")
+    }
+
+    /**
+     * Fetches the contents of one mood category. Results that are already on
+     * screen stay visible while a background re-fetch runs, so a pull-to-refresh
+     * never collapses the section into the "not available" placeholder.
+     */
+    private fun loadMood(
+        category: MoodCategory,
+        notLoadedMessage: String = "Could not load this mood",
+    ) {
         moodJob?.cancel()
         moodJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
-                    isMoodLoading = true,
-                    selectedFilter = HomeFilter.All,
-                    selectedMood = null,
-                    error = null,
+                    // Only show the loading skeleton when there is nothing to
+                    // keep on screen yet.
+                    isMoodLoading = it.selectedMood == null,
+                    error = if (it.selectedMood == null) null else it.error,
                 )
             }
             try {
                 val content = repository.moodCategory(category)
                 _uiState.update {
-                    it.copy(selectedMood = content, isMoodLoading = false)
+                    it.copy(
+                        // A missing provider page only clears an empty selection;
+                        // previously loaded results survive a failed re-fetch.
+                        selectedMood = content ?: it.selectedMood,
+                        isMoodLoading = false,
+                    )
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -330,7 +363,11 @@ class HomeViewModel(
                 _uiState.update {
                     it.copy(
                         isMoodLoading = false,
-                        error = failure.message ?: "Could not load this category",
+                        error = if (it.selectedMood == null) {
+                            failure.message ?: notLoadedMessage
+                        } else {
+                            it.error
+                        },
                     )
                 }
             }

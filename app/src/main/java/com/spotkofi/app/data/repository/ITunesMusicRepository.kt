@@ -109,7 +109,13 @@ class ItunesMusicRepository internal constructor(
         val youtubeSections = runCatalog {
             youtubeHomeClient.sections(tab, country = region)
         }.orEmpty()
-        if (youtubeSections.isNotEmpty()) return@coroutineScope youtubeSections
+        if (youtubeSections.isNotEmpty()) return@coroutineScope youtubeSections.map { section ->
+            when (section) {
+                is HomeSection.Songs -> section.copy(items = section.items.filterExplicit())
+                is HomeSection.Cards -> section.copy(items = section.items.filterExplicitCollections())
+                else -> section
+            }
+        }
 
         when (tab) {
             HomeTab.All -> {
@@ -289,7 +295,7 @@ class ItunesMusicRepository internal constructor(
                     // The provider's own heading is preferred; the tile's label is
                     // the fallback when the page returns none.
                     title = page.title.ifBlank { category.title },
-                    songs = page.songs,
+                    songs = page.songs.filterExplicit(),
                     playlists = page.playlists,
                 )
             }
@@ -435,10 +441,10 @@ class ItunesMusicRepository internal constructor(
         TrackDetails(
             contextLabel = track.albumTitle.ifBlank { track.artistName },
             artistGenre = enrichment?.artistGenre,
-            albumTracks = albumTracks.await().orEmpty().filterNot { it.id == track.id },
-            moreByArtist = artistTracks.await().orEmpty().filterNot { it.id == track.id },
+            albumTracks = albumTracks.await().orEmpty().filterExplicit().filterNot { it.id == track.id },
+            moreByArtist = artistTracks.await().orEmpty().filterExplicit().filterNot { it.id == track.id },
             artistAlbums = artistAlbums.await().orEmpty(),
-            recommendations = recommendations.filterNot { it.id == track.id },
+            recommendations = recommendations.filterExplicit().filterNot { it.id == track.id },
             lyrics = lyrics.await()?.let { result ->
                 TrackLyrics(
                     plain = result.plain,
@@ -609,6 +615,20 @@ class ItunesMusicRepository internal constructor(
     private fun List<Track>.filterExplicit(): List<Track> =
         if (settingsProvider().hideExplicitContent) filterNot { it.isExplicit } else this
 
+
+    /**
+     * Filters collections that are likely to contain explicit content.
+     * Since collections do not carry an explicit flag, we check for explicit
+     * keywords in the title or subtitle as a best-effort heuristic.
+     */
+    private fun List<MediaCollection>.filterExplicitCollections(): List<MediaCollection> {
+        if (!settingsProvider().hideExplicitContent) return this
+        val explicitKeywords = listOf("explicit", "uncensored", "parental advisory", "nsfw", "18+", "adult")
+        return filterNot { collection ->
+            val text = "${collection.title} ${collection.subtitle}".lowercase()
+            explicitKeywords.any { keyword -> text.contains(keyword) }
+        }
+    }
     private fun remember(items: List<MediaCollection>) {
         items.forEach { collectionsById[it.id] = it }
     }

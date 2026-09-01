@@ -55,8 +55,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import com.spotkofi.app.ui.components.artworkSeedColor
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spotkofi.app.core.LocalAppContainer
+import com.spotkofi.app.data.local.AppSettings
 import com.spotkofi.app.data.local.LocalMusicStore
 import com.spotkofi.app.data.model.Album
 import com.spotkofi.app.data.model.Artist
@@ -117,6 +123,7 @@ fun LibraryScreen(
     val container = LocalAppContainer.current
     val repository = container.musicRepository
     val store = container.localStore
+    val settings by container.settingsStore.settings.collectAsStateWithLifecycle()
     val dimens = SpotKofiTheme.dimens
     val colors = SpotKofiTheme.colors
     val layout = rememberResponsiveLayout()
@@ -738,12 +745,14 @@ private fun LibraryAnalytics(
     val colors = SpotKofiTheme.colors
     val dimens = SpotKofiTheme.dimens
     val totalPlays = history.sumOf { it.playCount }
+    val uniqueSongs = history.size
     val topTracks = remember(history) {
         history.sortedWith(
             compareByDescending<LocalMusicStore.HistoryEntry> { it.playCount }
                 .thenByDescending { it.playedAt },
         ).take(5)
     }
+    val maxPlays = topTracks.firstOrNull()?.playCount ?: 1
 
     Column(
         modifier = modifier
@@ -752,92 +761,170 @@ private fun LibraryAnalytics(
             .background(colors.card)
             .padding(dimens.spaceLg),
     ) {
+        // --- Clean header: label + big number, no gradient ---
         Text(
             text = "Listening analytics",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = colors.textPrimary,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textTertiary,
         )
         Spacer(Modifier.height(dimens.spaceXs))
-        Text(
-            text = "Your local SpotKofi history",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textSecondary,
-        )
-        Spacer(Modifier.height(dimens.spaceMd))
-        Row(horizontalArrangement = Arrangement.spacedBy(dimens.spaceXl)) {
-            AnalyticsMetric(value = totalPlays.toString(), label = "plays")
-            AnalyticsMetric(value = history.size.toString(), label = "songs")
-        }
-        if (topTracks.isNotEmpty()) {
-            Spacer(Modifier.height(dimens.spaceLg))
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(dimens.spaceSm),
+        ) {
             Text(
-                text = "Most played",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                text = totalPlays.toString(),
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Black,
                 color = colors.textPrimary,
             )
-            topTracks.forEach { entry ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = dimens.spaceSm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Artwork(
-                        id = entry.track.id,
-                        url = entry.track.artworkUrl,
-                        size = 42.dp,
-                    )
-                    Spacer(Modifier.width(dimens.spaceSm))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = entry.track.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = colors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = entry.track.artistName,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.textSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
-                        text = "${entry.playCount} plays",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.accent,
+            Text(
+                text = if (totalPlays == 1) "play" else "plays",
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+
+        // Secondary stats as simple inline text
+        Spacer(Modifier.height(dimens.spaceXs))
+        Row(horizontalArrangement = Arrangement.spacedBy(dimens.spaceMd)) {
+            Text(
+                text = "$uniqueSongs ${if (uniqueSongs == 1) "song" else "songs"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+            val avgPlays = if (uniqueSongs > 0) totalPlays / uniqueSongs else 0
+            Text(
+                text = "$avgPlays avg",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textTertiary,
+            )
+        }
+
+        // --- Top tracks list with generous spacing for titles ---
+        if (topTracks.isNotEmpty()) {
+            Spacer(Modifier.height(dimens.spaceLg))
+            topTracks.forEachIndexed { index, entry ->
+                val fraction = entry.playCount.toFloat() / maxPlays
+                AnalyticsTrackRow(
+                    rank = index + 1,
+                    entry = entry,
+                    barFraction = fraction,
+                    colors = colors,
+                    dimens = dimens,
+                )
+                if (index < topTracks.lastIndex) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = dimens.spaceSm)
+                            .height(1.dp)
+                            .background(colors.divider),
                     )
                 }
             }
         } else {
-            Spacer(Modifier.height(dimens.spaceMd))
-            Text(
-                text = "Play a song to start building your stats.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary,
-            )
+            Spacer(Modifier.height(dimens.spaceXl))
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ShowChart,
+                    contentDescription = null,
+                    tint = colors.textTertiary,
+                    modifier = Modifier.size(dimens.iconLg),
+                )
+                Spacer(Modifier.height(dimens.spaceSm))
+                Text(
+                    text = "No listening data yet",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textSecondary,
+                )
+                Text(
+                    text = "Play songs to build your personal stats.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textTertiary,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun AnalyticsMetric(value: String, label: String) {
-    Column {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = SpotKofiTheme.colors.accent,
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = SpotKofiTheme.colors.textSecondary,
-        )
+private fun AnalyticsTrackRow(
+    rank: Int,
+    entry: LocalMusicStore.HistoryEntry,
+    barFraction: Float,
+    colors: com.spotkofi.app.ui.theme.SpotKofiColors,
+    dimens: com.spotkofi.app.ui.theme.SpotKofiDimens,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) {
+            // Rank badge — small fixed-width column
+            Text(
+                text = rank.toString(),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = colors.brown,
+                modifier = Modifier.width(24.dp).padding(top = 2.dp),
+            )
+            Artwork(
+                id = entry.track.id,
+                url = entry.track.artworkUrl,
+                size = 40.dp,
+            )
+            Spacer(Modifier.width(dimens.spaceSm))
+            // Title + artist stack with NO maxLines restriction on title
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = entry.track.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.textPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = MaterialTheme.typography.bodyMedium.lineHeight,
+                )
+                Text(
+                    text = entry.track.artistName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(dimens.spaceSm))
+            Text(
+                text = entry.playCount.toString(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = colors.brown,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        // Subtle proportional bar
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(colors.divider),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(barFraction.coerceIn(0.05f, 1f))
+                    .fillMaxHeight()
+                    .background(colors.brown.copy(alpha = 0.4f)),
+            )
+        }
     }
 }
 

@@ -357,50 +357,40 @@ private fun HomeContent(
                 }
             }
 
-            if (
-                state.selectedFilter == HomeFilter.All ||
-                state.selectedMood != null ||
-                state.isMoodLoading
-            ) {
-                item(key = "home_explore") {
-                    HomeExploreSections(
-                        state = state,
-                        layout = layout,
-                        playingTrackId = playingTrackId,
-                        onCollectionClick = onCollectionClick,
-                        onTrackClick = onTrackClick,
-                        onTrackMore = onTrackMore,
-                        onMoodClick = onMoodClick,
-                        onRegionClick = onRegionClick,
-                    )
-                }
+            item(key = "home_explore") {
+                HomeExploreSections(
+                    state = state,
+                    layout = layout,
+                    playingTrackId = playingTrackId,
+                    onCollectionClick = onCollectionClick,
+                    onTrackClick = onTrackClick,
+                    onTrackMore = onTrackMore,
+                    onMoodClick = onMoodClick,
+                    onRegionClick = onRegionClick,
+                )
             }
 
-            if (
-                state.selectedFilter == HomeFilter.All &&
-                state.selectedMood == null &&
-                !state.isMoodLoading
-            ) {
-                state.sections.forEachIndexed { index, section ->
-                    item(key = section.id) {
-                        // A LazyColumn item is a single slot, so the block and its
-                        // trailing gap need a layout around them.
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .staggeredEntry(index + 2),
-                        ) {
-                            HomeSectionBlock(
-                                section = section,
-                                layout = layout,
-                                onCollectionClick = onCollectionClick,
-                                onTrackClick = onTrackClick,
-                                onTrackMore = onTrackMore,
-                                playingTrackId = playingTrackId,
-                                downloads = downloads,
-                            )
-                            Spacer(Modifier.height(dimens.shelfSpacing))
-                        }
+            // The All-feed shelves always render; a mood filter adds its results
+            // above them instead of hiding them.
+            state.sections.forEachIndexed { index, section ->
+                item(key = section.id) {
+                    // A LazyColumn item is a single slot, so the block and its
+                    // trailing gap need a layout around them.
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .staggeredEntry(index + 2),
+                    ) {
+                        HomeSectionBlock(
+                            section = section,
+                            layout = layout,
+                            onCollectionClick = onCollectionClick,
+                            onTrackClick = onTrackClick,
+                            onTrackMore = onTrackMore,
+                            playingTrackId = playingTrackId,
+                            downloads = downloads,
+                        )
+                        Spacer(Modifier.height(dimens.shelfSpacing))
                     }
                 }
             }
