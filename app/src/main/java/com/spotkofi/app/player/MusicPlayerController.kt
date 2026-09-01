@@ -115,6 +115,11 @@ class MusicPlayerController(
     private var currentVideoId: String? = null
     private var currentStreamQuality: AudioQuality? = null
     private var released = false
+    private var trackedTrack: Track? = null
+    private var trackedSessionStartedAt = 0L
+    private var trackedLastPositionMs = 0L
+    private var trackedListenedMs = 0L
+    private var playRecordedTrackId: String? = null
 
     /**
      * Bumped only by [play], never by queue advances.
@@ -165,6 +170,17 @@ class MusicPlayerController(
                         isPlaying = status == PlaybackStatus.Playing,
                     )
                 }
+                when (status) {
+                    PlaybackStatus.Playing -> startListeningSession()
+                    PlaybackStatus.Paused,
+                    PlaybackStatus.Idle,
+                    PlaybackStatus.Error,
+                    -> finishListeningSession()
+
+                    PlaybackStatus.Resolving,
+                    PlaybackStatus.Buffering,
+                    -> Unit
+                }
                 // Started only once audio is genuinely playing. Starting it at
                 // resolve time would leave a foreground service with nothing to
                 // show while the stream URL is still being fetched.
@@ -189,6 +205,15 @@ class MusicPlayerController(
 
         audioPlayer.setOnPlaybackProgressChanged { positionMs, durationMs ->
             if (!released) {
+                val activeTrack = trackedTrack
+                val currentTrack = _state.value.track
+                if (activeTrack != null && activeTrack.id == currentTrack?.id) {
+                    val delta = positionMs - trackedLastPositionMs
+                    if (delta in 1..MAX_TRACKING_DELTA_MS) {
+                        trackedListenedMs += delta
+                    }
+                    trackedLastPositionMs = positionMs
+                }
                 _state.update { current ->
                     current.copy(
                         positionMs = positionMs,
@@ -531,6 +556,7 @@ class MusicPlayerController(
     /** Releases the resolver scope and the Media3 decoder. Safe to call twice. */
     fun release() {
         if (released) return
+        finishListeningSession()
         released = true
         playbackGeneration++
         activePlaybackJob?.cancel()
@@ -550,6 +576,8 @@ class MusicPlayerController(
 
         activePlaybackJob?.cancel()
         val generation = ++playbackGeneration
+        finishListeningSession()
+        playRecordedTrackId = null
         audioPlayer.stop()
         currentVideoId = track.videoId?.trim()?.takeIf { it.isNotEmpty() }
         currentStreamQuality = null
@@ -565,8 +593,6 @@ class MusicPlayerController(
                 playRequestId = playRequestId,
             )
         }
-        localStore.recordPlayed(track)
-
         activePlaybackJob = coroutineScope.launch {
             val resolved = try {
                 resolveStream(track)
@@ -685,6 +711,42 @@ class MusicPlayerController(
             get() = videoId?.let { "$it:${quality.key}" }
     }
 
+    private fun startListeningSession() {
+        val track = _state.value.track ?: return
+        if (trackedTrack?.id != track.id) {
+            finishListeningSession()
+            trackedTrack = track
+            trackedSessionStartedAt = System.currentTimeMillis()
+            trackedLastPositionMs = _state.value.positionMs
+            trackedListenedMs = 0L
+        }
+        if (playRecordedTrackId != track.id) {
+            localStore.recordPlayed(track)
+            playRecordedTrackId = track.id
+        }
+    }
+
+    private fun finishListeningSession() {
+        val track = trackedTrack ?: return
+        val currentPosition = _state.value.positionMs
+        val finalDelta = currentPosition - trackedLastPositionMs
+        if (finalDelta in 1..MAX_TRACKING_DELTA_MS) {
+            trackedListenedMs += finalDelta
+        }
+        if (trackedListenedMs > 0L) {
+            localStore.recordPlaybackSession(
+                track = track,
+                listenedMs = trackedListenedMs,
+                durationMs = _state.value.effectiveDurationMs,
+                startedAt = trackedSessionStartedAt,
+            )
+        }
+        trackedTrack = null
+        trackedSessionStartedAt = 0L
+        trackedLastPositionMs = 0L
+        trackedListenedMs = 0L
+    }
+
     private fun handlePlaybackCompleted() {
         if (released) return
 
@@ -727,6 +789,8 @@ class MusicPlayerController(
         activePlaybackJob = null
         playbackGeneration++
         playbackIntent = false
+        finishListeningSession()
+        playRecordedTrackId = null
         currentVideoId = null
         currentStreamQuality = null
         audioPlayer.stop()
@@ -786,5 +850,6 @@ class MusicPlayerController(
         const val TAG = "SpotKofiPlayer"
         const val PREVIOUS_RESTART_THRESHOLD_MS = 5_000L
         const val MAX_CACHED_STREAMS = 12
+        const val MAX_TRACKING_DELTA_MS = 2_000L
     }
 }

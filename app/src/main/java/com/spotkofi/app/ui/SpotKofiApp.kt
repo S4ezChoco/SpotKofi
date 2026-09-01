@@ -59,6 +59,8 @@ import androidx.navigation.toRoute
 import com.spotkofi.app.core.AppContainer
 import com.spotkofi.app.data.model.PlaybackState
 import com.spotkofi.app.core.LocalAppContainer
+import com.spotkofi.app.data.model.Track
+import com.spotkofi.app.feature.analytics.ListeningAnalyticsScreen
 import com.spotkofi.app.feature.browse.ExploreScreen
 import com.spotkofi.app.feature.browse.MoodCategoryScreen
 import com.spotkofi.app.feature.collection.CollectionScreen
@@ -79,6 +81,7 @@ import com.spotkofi.app.ui.navigation.HomeGraph
 import com.spotkofi.app.ui.navigation.HomeRoute
 import com.spotkofi.app.ui.navigation.LibraryGraph
 import com.spotkofi.app.ui.navigation.LibraryRoute
+import com.spotkofi.app.ui.navigation.ListeningAnalyticsRoute
 import com.spotkofi.app.ui.navigation.SearchGraph
 import com.spotkofi.app.ui.navigation.SearchRoute
 import com.spotkofi.app.ui.navigation.SettingsRoute
@@ -436,9 +439,15 @@ fun SpotKofiApp(
                                             container.playerController.play(track, queue)
                                         },
                                         onOpenProfile = drawerState::open,
+                                        onAnalyticsClick = {
+                                            navController.navigate(ListeningAnalyticsRoute)
+                                        },
                                         onCreate = { showPlaylistDialog = true },
                                         contentPadding = screenPadding,
                                     )
+                                }
+                                analyticsDestination(navController, screenPadding) {
+                                    track, queue -> container.playerController.play(track, queue)
                                 }
                                 collectionDestination(navController, screenPadding)
                             }
@@ -678,6 +687,9 @@ private fun MiniPlayerHost(
  * screens rather than a reload.
  */
 private fun NavHostController.switchTab(destination: TopLevelDestination) {
+    if (currentDestination?.hasRoute(ListeningAnalyticsRoute::class) == true) {
+        popBackStack()
+    }
     val graphRoute: Any = when (destination) {
         TopLevelDestination.Home -> HomeGraph
         TopLevelDestination.Search -> SearchGraph
@@ -701,6 +713,13 @@ private fun NavHostController.switchTab(destination: TopLevelDestination) {
  * current tab should unwind to the top of it.
  */
 private fun NavHostController.popToTabRoot(destination: TopLevelDestination) {
+    if (
+        destination == TopLevelDestination.Library &&
+        currentDestination?.hasRoute(ListeningAnalyticsRoute::class) == true
+    ) {
+        popBackStack()
+        return
+    }
     when (destination) {
         TopLevelDestination.Home -> popBackStack(HomeRoute, inclusive = false)
         TopLevelDestination.Search -> popBackStack(SearchRoute, inclusive = false)
@@ -785,6 +804,45 @@ private fun NavGraphBuilder.collectionDestination(
         CollectionScreen(
             collectionId = route.id,
             onBack = navController::popBackStack,
+            contentPadding = screenPadding,
+        )
+    }
+}
+
+/**
+ * Listening analytics is a full push from the Library header rather than an
+ * inline block, so it gets the same slide transitions as the collection detail.
+ */
+private fun NavGraphBuilder.analyticsDestination(
+    navController: NavHostController,
+    screenPadding: PaddingValues,
+    onTrackClick: (Track, List<Track>) -> Unit,
+) {
+    composable<ListeningAnalyticsRoute>(
+        enterTransition = {
+            if (isTabSwitch()) {
+                EnterTransition.None
+            } else {
+                slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { it }
+            }
+        },
+        exitTransition = {
+            if (isTabSwitch()) {
+                ExitTransition.None
+            } else {
+                slideOutHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+            }
+        },
+        popEnterTransition = {
+            slideInHorizontally(tween(Motion.Medium, easing = Motion.Emphasized)) { -it / 6 }
+        },
+        popExitTransition = {
+            slideOutHorizontally(tween(Motion.Medium, easing = Motion.Accelerate)) { it }
+        },
+    ) {
+        ListeningAnalyticsScreen(
+            onBack = navController::popBackStack,
+            onTrackClick = onTrackClick,
             contentPadding = screenPadding,
         )
     }

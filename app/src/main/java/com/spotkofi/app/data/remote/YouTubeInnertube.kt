@@ -394,7 +394,7 @@ internal object Innertube {
         // between column 1 and 2 depending on the shelf.
         val creditRuns = columns.drop(1).flatMap { it.columnRuns() }
         val credits = creditsFrom(creditRuns)
-        val artistName = credits.artistName ?: return null
+        val artistName = credits.artistName ?: "Unknown artist"
 
         val durationMs = creditRuns
             .mapNotNull { it.string("text") }
@@ -426,7 +426,7 @@ internal object Innertube {
 
         val subtitleRuns = renderer["subtitle"].runObjects()
         val credits = creditsFrom(subtitleRuns)
-        val artistName = credits.artistName ?: return null
+        val artistName = credits.artistName ?: "Unknown artist"
         val durationMs = subtitleRuns
             .mapNotNull { it.string("text") }
             .asReversed()

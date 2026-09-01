@@ -91,9 +91,8 @@ fun MiniPlayer(
 
     // Pushed well towards black so white text clears contrast on every seed, then
     // used as a gradient so the card has some depth instead of reading as a slab.
-    val tint = remember(track.id) {
-        lerp(artworkSeedColor(track.id), Color.Black, 0.55f)
-    }
+    val artworkColor = rememberArtworkColor(track.id, track.artworkUrl)
+    val tint = lerp(artworkColor, Color.Black, 0.34f)
     val cardBrush = remember(tint) {
         Brush.horizontalGradient(
             0f to lerp(tint, Color.White, 0.06f),

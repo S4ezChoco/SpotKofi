@@ -49,6 +49,9 @@ class LocalMusicStore(context: Context) {
     private val _historyStats = MutableStateFlow<List<HistoryEntry>>(emptyList())
     val historyStats: StateFlow<List<HistoryEntry>> = _historyStats.asStateFlow()
 
+    private val _playbackEvents = MutableStateFlow<List<PlaybackEvent>>(emptyList())
+    val playbackEvents: StateFlow<List<PlaybackEvent>> = _playbackEvents.asStateFlow()
+
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
 
@@ -147,7 +150,7 @@ class LocalMusicStore(context: Context) {
         }
     }
 
-    /** Records a play without storing a signed/expiring stream URL. */
+    /** Records a verified play without storing a signed/expiring stream URL. */
     fun recordPlayed(track: Track) {
         scope.launch {
             val db = helper.writableDatabase
@@ -182,6 +185,36 @@ class LocalMusicStore(context: Context) {
         }
     }
 
+    fun recordPlaybackSession(
+        track: Track,
+        listenedMs: Long,
+        durationMs: Long,
+        startedAt: Long,
+    ) {
+        if (listenedMs <= 0L) return
+        scope.launch {
+            val db = helper.writableDatabase
+            db.beginTransaction()
+            try {
+                upsertTrack(db, track)
+                db.insert(
+                    TABLE_PLAYBACK_EVENTS,
+                    null,
+                    ContentValues().apply {
+                        put("track_id", track.id)
+                        put("started_at", startedAt)
+                        put("listened_ms", listenedMs)
+                        put("duration_ms", durationMs)
+                    },
+                )
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+            refreshAll()
+        }
+    }
+
     /**
      * Forgets every play.
      *
@@ -191,7 +224,15 @@ class LocalMusicStore(context: Context) {
      */
     fun clearHistory() {
         scope.launch {
-            helper.writableDatabase.delete(TABLE_HISTORY, null, null)
+            val db = helper.writableDatabase
+            db.beginTransaction()
+            try {
+                db.delete(TABLE_HISTORY, null, null)
+                db.delete(TABLE_PLAYBACK_EVENTS, null, null)
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
             refreshAll()
         }
     }
@@ -461,6 +502,7 @@ class LocalMusicStore(context: Context) {
         val historyRows = readHistoryStats(db)
         _historyStats.value = historyRows
         _history.value = historyRows.map { it.track }
+        _playbackEvents.value = readPlaybackEvents(db)
         // Only playlists this app created.
         //
         // Saving a provider playlist also writes a collections row of type
@@ -548,6 +590,31 @@ class LocalMusicStore(context: Context) {
                         track = cursor.toTrack(),
                         playCount = cursor.getInt(cursor.getColumnIndexOrThrow("play_count")),
                         playedAt = cursor.getLong(cursor.getColumnIndexOrThrow("played_at")),
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun readPlaybackEvents(db: SQLiteDatabase): List<PlaybackEvent> = db.rawQuery(
+        """
+        SELECT t.*, p.started_at, p.listened_ms, p.duration_ms AS session_duration_ms
+        FROM $TABLE_TRACKS t
+        INNER JOIN $TABLE_PLAYBACK_EVENTS p ON p.track_id = t.id
+        ORDER BY p.started_at DESC
+        """.trimIndent(),
+        null,
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(
+                    PlaybackEvent(
+                        track = cursor.toTrack(),
+                        startedAt = cursor.getLong(cursor.getColumnIndexOrThrow("started_at")),
+                        listenedMs = cursor.getLong(cursor.getColumnIndexOrThrow("listened_ms")),
+                        durationMs = cursor.getLong(
+                            cursor.getColumnIndexOrThrow("session_duration_ms"),
+                        ),
                     ),
                 )
             }
@@ -739,6 +806,13 @@ class LocalMusicStore(context: Context) {
         val playedAt: Long,
     )
 
+    data class PlaybackEvent(
+        val track: Track,
+        val startedAt: Long,
+        val listenedMs: Long,
+        val durationMs: Long,
+    )
+
     data class LocalDownload(
         val track: Track,
         val status: String,
@@ -810,6 +884,15 @@ class LocalMusicStore(context: Context) {
             db.execSQL("CREATE TABLE IF NOT EXISTS visited_collections(collection_id TEXT PRIMARY KEY NOT NULL, visited_at INTEGER NOT NULL)")
             db.execSQL("CREATE TABLE IF NOT EXISTS saved_collections(collection_id TEXT PRIMARY KEY NOT NULL, saved_at INTEGER NOT NULL)")
             db.execSQL("CREATE TABLE IF NOT EXISTS history(track_id TEXT PRIMARY KEY NOT NULL, played_at INTEGER NOT NULL, play_count INTEGER NOT NULL DEFAULT 1)")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS playback_events(" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "track_id TEXT NOT NULL, " +
+                    "started_at INTEGER NOT NULL, " +
+                    "listened_ms INTEGER NOT NULL, " +
+                    "duration_ms INTEGER NOT NULL DEFAULT 0)",
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_playback_events_started_at ON playback_events(started_at)")
             db.execSQL("CREATE TABLE IF NOT EXISTS playlist_tracks(playlist_id TEXT NOT NULL, track_id TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY(playlist_id, track_id))")
             db.execSQL("CREATE TABLE IF NOT EXISTS queue(position INTEGER PRIMARY KEY NOT NULL, track_id TEXT NOT NULL)")
             db.execSQL(
@@ -832,7 +915,7 @@ class LocalMusicStore(context: Context) {
 
         private companion object {
             const val DATABASE_NAME = "spotkofi_local.db"
-            const val DATABASE_VERSION = 2
+            const val DATABASE_VERSION = 3
         }
     }
 
@@ -851,6 +934,7 @@ class LocalMusicStore(context: Context) {
         const val TABLE_VISITED = "visited_collections"
         const val TABLE_SAVED_COLLECTIONS = "saved_collections"
         const val TABLE_HISTORY = "history"
+        const val TABLE_PLAYBACK_EVENTS = "playback_events"
         const val TABLE_PLAYLIST_TRACKS = "playlist_tracks"
         const val TABLE_QUEUE = "queue"
         const val TABLE_DOWNLOADS = "downloads"

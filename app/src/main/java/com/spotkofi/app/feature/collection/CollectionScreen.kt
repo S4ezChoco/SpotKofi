@@ -66,7 +66,7 @@ import com.spotkofi.app.ui.components.ErrorState
 import com.spotkofi.app.ui.components.PlayButton
 import com.spotkofi.app.ui.components.TrackActionsSheet
 import com.spotkofi.app.ui.components.TrackRow
-import com.spotkofi.app.ui.components.artworkSeedColor
+import com.spotkofi.app.ui.components.rememberArtworkColor
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -221,15 +221,15 @@ private fun CollectionContent(
         return
     }
 
-    val seed = remember(collection.id) { artworkSeedColor(collection.id) }
+    val seed = rememberArtworkColor(collection.id, collection.artworkUrl)
     // Desaturated towards the background so the track list below stays legible
     // rather than sitting on saturated colour.
-    val headerBrush = remember(seed) {
+    val headerBrush = remember(seed, colors.base) {
         Brush.verticalGradient(
             listOf(
-                lerp(seed, colors.base, 0.42f),
-                lerp(seed, colors.base, 0.78f),
-                colors.base,
+                seed,
+                lerp(seed, colors.base, 0.34f),
+                lerp(seed, colors.base, 0.72f),
             ),
         )
     }

@@ -39,6 +39,10 @@ data object SearchRoute
 @Serializable
 data object LibraryRoute
 
+/** The user's listening statistics, pushed from the Library header. */
+@Serializable
+data object ListeningAnalyticsRoute
+
 /** Album, playlist or artist detail, resolved by [id]. */
 @Serializable
 data class CollectionRoute(val id: String)

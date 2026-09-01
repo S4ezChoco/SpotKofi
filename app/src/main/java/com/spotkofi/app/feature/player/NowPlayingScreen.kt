@@ -32,6 +32,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -107,11 +109,12 @@ import com.spotkofi.app.ui.components.QueueSheet
 import com.spotkofi.app.ui.components.SavedToggle
 import com.spotkofi.app.ui.components.TrackCreditsSheet
 import com.spotkofi.app.ui.components.TrackOptionsSheet
-import com.spotkofi.app.ui.components.artworkSeedColor
+import com.spotkofi.app.ui.components.rememberArtworkColor
 import com.spotkofi.app.ui.motion.clickableScale
 import com.spotkofi.app.ui.theme.ErrorRed
 import com.spotkofi.app.ui.theme.Motion
 import com.spotkofi.app.ui.theme.SpotKofiTheme
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -229,12 +232,12 @@ private fun NowPlayingContent(
         return
     }
 
-    val seed = remember(track.id) { artworkSeedColor(track.id) }
-    val pageBrush = remember(seed) {
+    val seed = rememberArtworkColor(track.id, track.artworkUrl)
+    val pageBrush = remember(seed, colors.base) {
         Brush.verticalGradient(
-            0f to lerp(seed, colors.base, 0.55f),
-            0.35f to colors.base,
-            1f to colors.base,
+            0f to seed,
+            0.58f to lerp(seed, colors.base, 0.38f),
+            1f to lerp(seed, colors.base, 0.72f),
         )
     }
 
@@ -293,6 +296,26 @@ private fun NowPlayingContent(
             .fillMaxSize()
             .background(pageBrush),
     ) {
+        AsyncImage(
+            model = track.artworkUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            alpha = 0.5f,
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(72.dp),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.6f to colors.base.copy(alpha = 0.18f),
+                        1f to colors.base.copy(alpha = 0.46f),
+                    ),
+                ),
+        )
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),

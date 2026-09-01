@@ -27,7 +27,11 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import coil3.BitmapImage
+import coil3.DrawableImage
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
 import com.spotkofi.app.ui.theme.ArtworkSeeds
 import com.spotkofi.app.ui.theme.SpotKofiTheme
 import kotlin.math.absoluteValue
@@ -43,6 +47,85 @@ fun artworkBrush(id: String): Brush {
 fun artworkSeedColor(id: String): Color {
     val hash = id.hashCode().absoluteValue
     return ArtworkSeeds[hash % ArtworkSeeds.size]
+}
+
+@Composable
+fun rememberArtworkColor(id: String, url: String?): Color {
+    val displayUrl = remember(url) {
+        url?.takeIf { it.isNotBlank() }?.let(::optimizedArtworkUrl)
+    }
+    val painter = rememberAsyncImagePainter(model = displayUrl)
+    val sampledColor = (painter.state as? AsyncImagePainter.State.Success)
+        ?.result
+        ?.image
+        ?.let { image ->
+            when (image) {
+                is BitmapImage -> image.bitmap
+                is DrawableImage -> image.drawable.toArtworkBitmap()
+                else -> null
+            }
+        }
+        ?.let(::sampleArtworkColor)
+    return sampledColor ?: artworkSeedColor(id)
+}
+
+private fun android.graphics.drawable.Drawable.toArtworkBitmap(): android.graphics.Bitmap {
+    val width = intrinsicWidth.coerceAtLeast(1)
+    val height = intrinsicHeight.coerceAtLeast(1)
+    return android.graphics.Bitmap.createBitmap(
+        width,
+        height,
+        android.graphics.Bitmap.Config.ARGB_8888,
+    ).also { bitmap ->
+        android.graphics.Canvas(bitmap).also { canvas ->
+            setBounds(0, 0, canvas.width, canvas.height)
+            draw(canvas)
+        }
+    }
+}
+
+private fun sampleArtworkColor(bitmap: android.graphics.Bitmap): Color {
+    val stepX = (bitmap.width / 24).coerceAtLeast(1)
+    val stepY = (bitmap.height / 24).coerceAtLeast(1)
+    var red = 0f
+    var green = 0f
+    var blue = 0f
+    var weightTotal = 0f
+
+    for (y in 0 until bitmap.height step stepY) {
+        for (x in 0 until bitmap.width step stepX) {
+            val pixel = bitmap.getPixel(x, y)
+            val alpha = android.graphics.Color.alpha(pixel) / 255f
+            val pixelRed = android.graphics.Color.red(pixel) / 255f
+            val pixelGreen = android.graphics.Color.green(pixel) / 255f
+            val pixelBlue = android.graphics.Color.blue(pixel) / 255f
+            val brightness = (pixelRed + pixelGreen + pixelBlue) / 3f
+            if (alpha < 0.5f || brightness < 0.06f || brightness > 0.94f) continue
+            val saturation = maxOf(pixelRed, pixelGreen, pixelBlue) -
+                minOf(pixelRed, pixelGreen, pixelBlue)
+            val weight = alpha * (0.35f + saturation)
+            red += pixelRed * weight
+            green += pixelGreen * weight
+            blue += pixelBlue * weight
+            weightTotal += weight
+        }
+    }
+
+    if (weightTotal == 0f) {
+        return Color(bitmap.getPixel(bitmap.width / 2, bitmap.height / 2))
+    }
+    val hsv = FloatArray(3)
+    android.graphics.Color.RGBToHSV(
+        (red / weightTotal * 255f).toInt(),
+        (green / weightTotal * 255f).toInt(),
+        (blue / weightTotal * 255f).toInt(),
+        hsv,
+    )
+    return Color.hsv(
+        hue = hsv[0],
+        saturation = (hsv[1] * 1.35f).coerceIn(0.16f, 1f),
+        value = hsv[2].coerceIn(0.2f, 0.9f),
+    )
 }
 
 /**
